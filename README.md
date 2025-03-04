@@ -1,6 +1,6 @@
-# FIT-HCMUS-EduBot
+# FIT-HCMUS-Chat Bot Traveling
 
-## Hỗ trợ sinh viên IT tại HCMUS
+## Hỗ trợ mọi người du lịch
 
 ### **Mục lục**
 
