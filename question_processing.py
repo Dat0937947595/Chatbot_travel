@@ -59,15 +59,6 @@ if __name__ == "__main__":
 	chat_history = []
 
 	''' Test refine query '''
-	# chat_history = [
-	# 		{"role": "user", "content": "Các địa điểm du lịch nổi tiếng ở hồ chí minh?"},
-	# 		{"role": "assistant", "content": "hồ chí minh có nhiều điểm du lịch như..."}
-	# ]
-	# user_query = "Thời tiết hôm nay như thế nào?"
-	# refined_query = refine_query(user_query, chat_history)
-	# logger.info(f"Câu hỏi sau refine: {refined_query}")
-
-	''' Test refine query '''
 	# Refine câu hỏi
 	while True:
 		user_query = input("Nhập câu hỏi của bạn: ")	
