@@ -10,7 +10,6 @@ import logging
 import os
 import dotenv
 from prompts.prompt_template import *
-
 from langchain_core.output_parsers import StrOutputParser
 from langchain_groq import ChatGroq
 from langchain.tools import Tool
@@ -40,6 +39,8 @@ llm_all = ChatGroq(
             api_key=api_key_llm
 )
 
+### Hàm viết lại câu query 
+
 ### Hàm refine query dựa trên lịch sử hội thoại
 def refine_query(user_query):
     """
@@ -55,13 +56,28 @@ def refine_query(user_query):
         
         print(history_all)
         refined_query = refined_query_chain.invoke({"chat_history": history_all, "user_query": user_query})
+
+        # Nếu kết quả chứa "<Ask>", trả về nguyên đoạn đó
+        if "<Ask>" in refined_query:
+            return refined_query
+    
+        # Nếu không có "<Ask>", tiếp tục xử lý các bước tiếp theo
+        return handle_next_steps(refined_query)
+    
     except Exception as e:
         logger.error(f"Lỗi khi refine query: {e}")
         # Trường hợp lỗi, giữ nguyên câu hỏi gốc
-        refined_query = user_query
-    
-    return refined_query
+        return user_query
 
+def handle_next_steps(query):
+    """
+    Thực hiện các bước tiếp theo sau khi refine câu hỏi.
+    """
+    print(f"Tiếp tục xử lý với câu hỏi: {query}")
+    return query  # Thay thế bằng xử lý thực tế của bạn
+
+
+###Tóm tắt lịch sử
 def summary_history(conversation):
     summary_history_chain = (
         summary_history_prompt_template
@@ -116,4 +132,3 @@ agent_search_executor = AgentExecutor(
     verbose=True,
     handle_parsing_errors=False
 )
-
