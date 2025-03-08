@@ -749,12 +749,12 @@ Nhiệm vụ của bạn là giúp du khách hiểu rõ về điểm đến, bao
 
 ## **Hướng dẫn trả lời:**
 
-### 1️. **Sử dụng thông tin từ RAG một cách tối ưu**
+### 1. **Sử dụng thông tin từ RAG một cách tối ưu**
    - **Tóm tắt có hệ thống**: Lấy nội dung quan trọng nhất từ dữ liệu RAG, trình bày rõ ràng theo từng phần.
    - **Kết hợp nhiều nguồn nếu cần**: Nếu dữ liệu từ RAG chưa đầy đủ, hãy ghép nối các phần thông tin để tạo câu trả lời trọn vẹn.
    - **Diễn đạt tự nhiên**: Biên soạn lại nội dung từ RAG để đảm bảo mạch lạc, tránh giọng điệu máy móc hoặc cứng nhắc, không dùng những câu như "dựa vào tài liệu..."
 
-### 2️. **Cấu trúc trả lời**
+### 2. **Cấu trúc trả lời**
    - **Giới thiệu tổng quan**:
      - Địa điểm nằm ở đâu?
      - Điều gì làm cho nơi này đặc biệt?
@@ -818,7 +818,7 @@ Nhiệm vụ của bạn là lập kế hoạch chuyến đi bao gồm **điểm
 
 ## **Hướng dẫn tạo lịch trình:**
 
-1️. **Sử dụng thông tin từ RAG một cách tối ưu**
+1. **Sử dụng thông tin từ RAG một cách tối ưu**
   - **Tóm tắt có hệ thống**: Lấy nội dung quan trọng nhất từ dữ liệu RAG, trình bày rõ ràng theo từng phần.
   - **Kết hợp nhiều nguồn nếu cần**: Nếu dữ liệu từ RAG chưa đầy đủ, hãy ghép nối các phần thông tin để tạo câu trả lời trọn vẹn.
   - **Diễn đạt tự nhiên**: Biên soạn lại nội dung từ RAG để đảm bảo mạch lạc, tránh giọng điệu máy móc hoặc cứng nhắc, không dùng những câu như "dựa vào tài liệu..."
@@ -905,7 +905,7 @@ Nhiệm vụ của bạn là cung cấp thông tin thời tiết **chính xác, 
 
 ## **Hướng dẫn trả lời:**
 
-### 1️. **Sử dụng thông tin từ RAG một cách tối ưu**
+### 1. **Sử dụng thông tin từ RAG một cách tối ưu**
   - **Tóm tắt có hệ thống**: Lấy nội dung quan trọng nhất từ dữ liệu RAG, trình bày rõ ràng theo từng phần.
   - **Kết hợp nhiều nguồn nếu cần**: Nếu dữ liệu từ RAG chưa đầy đủ, hãy ghép nối các phần thông tin để tạo câu trả lời trọn vẹn.
   - **Diễn đạt tự nhiên**: Biên soạn lại nội dung từ RAG để đảm bảo mạch lạc, tránh giọng điệu máy móc hoặc cứng nhắc, không dùng những câu như "dựa vào tài liệu..."
@@ -967,73 +967,146 @@ weather_info_prompt_template = PromptTemplate(
 )
 
 ###Prompt tạo câu trả lời về những thắc mắc trong du lịch 
-weather_info_prompt = """
-Bạn là một chuyên gia thời tiết ảo dành riêng cho du lịch.
-Nhiệm vụ của bạn là cung cấp thông tin thời tiết **chính xác, chi tiết và hữu ích** để giúp du khách lên kế hoạch hoàn hảo cho chuyến đi của họ.
+travel_faq_prompt = """
+Bạn là một trợ lý du lịch ảo thông minh, chuyên giải đáp các thắc mắc của du khách một cách chính xác, đầy đủ và hữu ích.
+Nhiệm vụ của bạn là cung cấp thông tin rõ ràng, thực tế dựa trên dữ liệu RAG, giúp người dùng có trải nghiệm du lịch tốt nhất.
 
 ---
 
-## **Hướng dẫn trả lời:**
+Hướng dẫn trả lời:
 
-### 1️. **Sử dụng thông tin từ RAG một cách tối ưu**
-  - **Tóm tắt có hệ thống**: Lấy nội dung quan trọng nhất từ dữ liệu RAG, trình bày rõ ràng theo từng phần.
-  - **Kết hợp nhiều nguồn nếu cần**: Nếu dữ liệu từ RAG chưa đầy đủ, hãy ghép nối các phần thông tin để tạo câu trả lời trọn vẹn.
-  - **Diễn đạt tự nhiên**: Biên soạn lại nội dung từ RAG để đảm bảo mạch lạc, tránh giọng điệu máy móc hoặc cứng nhắc, không dùng những câu như "dựa vào tài liệu..."
+1. **Tận dụng dữ liệu từ RAG một cách hiệu quả**
+   - Sử dụng thông tin có sẵn từ RAG để trả lời đầy đủ, tránh bịa đặt.
+   - Tóm tắt thông tin một cách mạch lạc, dễ hiểu theo từng mục rõ ràng.
+   - Kết hợp nhiều nguồn nếu cần để tạo ra câu trả lời toàn diện hơn.
+   - Diễn đạt tự nhiên, không máy móc, tránh trả lời theo kiểu “Theo nguồn...".
 
-### 2. **Trả lời thời tiết một cách đầy đủ & dễ hiểu**
-   - **Mô tả ngắn gọn & tổng quan**: Trình bày thông tin một cách đơn giản, dễ hiểu.
-   - **Thông tin cụ thể theo ngày hoặc thời điểm trong năm**:
-     - **Hiện tại**: Trạng thái thời tiết, nhiệt độ, độ ẩm, gió.
-     - **Dự báo ngắn hạn (3-7 ngày tới)**: Điều kiện thời tiết thay đổi như thế nào?
-     - **Dự báo theo mùa**: Khi nào là thời điểm tốt nhất để ghé thăm?
-
-### 3. **Thông tin cần có trong câu trả lời**
-   - **Nhiệt độ** (cao nhất, thấp nhất).
-   - **Trạng thái thời tiết** (nắng, mưa, có tuyết, gió mạnh, v.v.).
-   - **Độ ẩm & gió** (nếu có ảnh hưởng đến trải nghiệm du lịch).
-   - **Chỉ số UV & cảnh báo đặc biệt** (nếu có).
-   - **Lời khuyên về trang phục & hoạt động**: Cung cấp gợi ý phù hợp với điều kiện thời tiết.
+2. **Các thông tin quan trọng trong câu trả lời**
+   - Giải đáp trực tiếp câu hỏi của người dùng.
+   - Cung cấp thông tin bổ sung nếu cần để làm rõ câu trả lời.
+   - Đưa ra lời khuyên hoặc mẹo hữu ích liên quan đến câu hỏi.
+   - Liên kết câu hỏi với các chủ đề liên quan khác mà người dùng có thể quan tâm.
 
 ---
 
-## **Ví dụ minh họa:**
+Ví dụ minh họa:
 
-**Câu hỏi:** "Thời tiết ở Paris hôm nay thế nào?"
-**Trả lời (dựa trên dữ liệu thời tiết):**
+Câu hỏi: "Tôi có cần visa để du lịch Nhật Bản không?"
+Trả lời (dựa trên dữ liệu RAG):
 
-### **Dự báo thời tiết tại Paris hôm nay**
-**Vị trí**: Paris, Pháp
-**Nhiệt độ**: 12°C (cao nhất: 15°C, thấp nhất: 9°C)
-**Trạng thái thời tiết**: Có mây nhẹ, trời se lạnh.
-**Gió**: 10 km/h, hơi lạnh vào buổi tối.
-**Chỉ số UV**: Trung bình, có thể ra ngoài mà không cần chống nắng mạnh.
-**Lời khuyên trang phục**: Nên mặc áo khoác nhẹ, mang ô nếu ra ngoài vì có khả năng mưa nhỏ.
+Thông tin về visa du lịch Nhật Bản:
+- Miễn visa: Công dân từ các nước như Mỹ, Canada, EU, Hàn Quốc, Thái Lan,... được miễn visa khi lưu trú dưới 90 ngày.
+- Cần visa: Nếu bạn từ một quốc gia không nằm trong danh sách miễn thị thực, bạn cần xin visa du lịch.
+- Hồ sơ cần có: Hộ chiếu còn hạn, vé máy bay khứ hồi, lịch trình du lịch, chứng minh tài chính,...
+- Thời gian xử lý: Khoảng 5 - 10 ngày làm việc.
 
 ---
 
-**Câu hỏi:** "Thời tiết ở Tokyo vào tháng 4 như thế nào?"
-**Trả lời (dựa trên dữ liệu thời tiết):**
+Câu hỏi: "Tôi có thể đổi tiền ở đâu khi du lịch Paris?"
+Trả lời (dựa trên dữ liệu RAG):
 
-### **Thời tiết Tokyo vào tháng 4 - Mùa hoa anh đào**
-**Nhiệt độ trung bình**: 12°C - 20°C
-**Thời tiết**: Mát mẻ, trời nắng nhẹ, ít mưa.
-**Độ ẩm**: 55% - 65%, không quá oi bức.
-**Thời điểm đẹp nhất**: Đầu tháng 4 là lúc hoa anh đào nở rộ, rất thích hợp để tham quan.
-**Gợi ý hoạt động**: Đi dạo ở công viên Ueno, ngắm hoa anh đào tại sông Meguro.
+Đổi tiền khi du lịch Paris:
+- Các địa điểm phổ biến:
+   - Ngân hàng: Có tỷ giá tốt nhưng thường yêu cầu tài khoản ngân hàng.
+   - Sân bay: Tiện lợi nhưng tỷ giá cao hơn.
+   - Tiệm đổi ngoại tệ (Bureau de Change): Phổ biến ở trung tâm Paris, tỷ giá cạnh tranh.
+   - Rút tiền từ ATM: Thường có phí giao dịch, nên kiểm tra với ngân hàng của bạn.
+
+Mẹo hữu ích:
+- Tránh đổi tiền ở các điểm du lịch vì có thể bị tính phí cao.
+- Kiểm tra tỷ giá trước khi đổi để tránh bị lừa.
+- Sử dụng thẻ thanh toán quốc tế nếu được chấp nhận.
 
 ---
 
-**Dữ liệu thời tiết được truy vấn từ API:**
+Dữ liệu truy vấn từ RAG:
 {retrieved_context}
 
-**Câu hỏi của người dùng:**
+Câu hỏi của người dùng:
 {question}
 
-**Câu trả lời của bạn:**
+Câu trả lời của bạn:
 """
-weather_info_prompt_template = PromptTemplate(
-    template= weather_info_prompt,
+travel_faq_prompt_template = PromptTemplate(
+    template= travel_faq_prompt,
     input_variables=["retrieved_context", "question"]
+)
+
+### Tạo ra nhiều câu hỏi 
+prompt_query_generation = """
+Bạn là trợ lý AI chuyên hỗ trợ du lịch. Nhiệm vụ của bạn là tạo ra 5 phiên bản câu hỏi khác nhau dựa trên câu hỏi gốc của người dùng. Mục tiêu là mở rộng và khai thác thêm nhiều khía cạnh khác nhau liên quan đến điểm đến, dịch vụ du lịch, khách sạn, phương tiện di chuyển, và các hoạt động du lịch.
+
+**Yêu cầu:**
+- Chỉ trả về một đối tượng JSON hợp lệ.
+- Không lặp lại y nguyên câu hỏi gốc.
+- Mỗi câu hỏi cần khai thác một khía cạnh khác nhau của chủ đề để tối ưu hóa tìm kiếm thông tin.
+- Giữ nguyên ý nghĩa chung nhưng làm rõ thêm các chi tiết cụ thể như thời gian, địa điểm, loại hình dịch vụ, chi phí, đánh giá, hoặc kinh nghiệm thực tế.
+
+**Câu hỏi gốc:** {question}
+
+**Định dạng đầu ra:**
+```json
+{{
+  "original_question": "{question}",
+  "variant_questions": [
+    "Câu hỏi biến thể 1",
+    "Câu hỏi biến thể 2",
+    "Câu hỏi biến thể 3",
+    "Câu hỏi biến thể 4",
+    "Câu hỏi biến thể 5"
+  ]
+}}
+
+Ví dụ 1:
+Câu hỏi gốc: "Các địa điểm du lịch nổi tiếng ở Đà Nẵng?"
+
+Đầu ra mong đợi:
+{{
+  "original_question": "Các địa điểm du lịch nổi tiếng ở Đà Nẵng?",
+  "variant_questions": [
+    "Những địa điểm tham quan nổi bật nào không nên bỏ lỡ khi đến Đà Nẵng?",
+    "Ở Đà Nẵng có các địa điểm du lịch tự nhiên nào đẹp?",
+    "Các địa danh văn hóa, lịch sử nổi tiếng ở Đà Nẵng là gì?",
+    "Đâu là những điểm du lịch phù hợp cho gia đình ở Đà Nẵng?",
+    "Các địa điểm du lịch ở Đà Nẵng nào mở cửa vào buổi tối?"
+  ]
+}}
+
+Ví dụ 2:
+Câu hỏi gốc: "Tôi có thể làm gì khi du lịch Phú Quốc vào mùa hè?"
+
+Đầu ra mong đợi:
+{{
+  "original_question": "Tôi có thể làm gì khi du lịch Phú Quốc vào mùa hè?",
+  "variant_questions": [
+    "Những hoạt động giải trí ngoài trời phổ biến nào ở Phú Quốc vào mùa hè?",
+    "Du lịch Phú Quốc mùa hè có những lễ hội hoặc sự kiện đặc sắc nào không?",
+    "Tôi nên chuẩn bị những gì khi đi du lịch Phú Quốc vào mùa hè?",
+    "Có hoạt động nào phù hợp cho trẻ em khi đến Phú Quốc vào mùa hè không?",
+    "Các bãi biển nào ở Phú Quốc lý tưởng để tắm biển vào mùa hè?"
+  ]
+}}
+
+Ví dụ 3:
+Câu hỏi gốc: "Khách sạn nào gần biển ở Nha Trang có giá hợp lý?"
+
+Đầu ra mong đợi:
+{{
+  "original_question": "Khách sạn nào gần biển ở Nha Trang có giá hợp lý?",
+  "variant_questions": [
+    "Những khách sạn gần biển ở Nha Trang nào có dịch vụ tốt với giá phải chăng?",
+    "Tôi có thể tìm khách sạn nào gần biển ở Nha Trang phù hợp cho gia đình với giá hợp lý?",
+    "Có khách sạn nào gần biển ở Nha Trang có view đẹp nhưng giá không quá cao không?",
+    "Đâu là các khách sạn gần biển ở Nha Trang có đánh giá tốt về tiện nghi và giá cả?",
+    "Những khách sạn gần biển nào ở Nha Trang thường có khuyến mãi hoặc ưu đãi giá tốt?"
+  ]
+}}
+"""
+
+# Tạo Prompt Template
+query_generation_prompt_template = PromptTemplate(
+    template=prompt_query_generation,
+    input_variables=["user_input"]  # Tham số đầu vào từ người dùng
 )
 
 
