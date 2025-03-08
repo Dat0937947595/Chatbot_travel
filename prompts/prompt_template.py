@@ -1108,7 +1108,3 @@ query_generation_prompt_template = PromptTemplate(
     template=prompt_query_generation,
     input_variables=["user_input"]  # Tham số đầu vào từ người dùng
 )
-
-
-
-
