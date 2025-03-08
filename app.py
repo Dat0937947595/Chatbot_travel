@@ -18,7 +18,7 @@ from typing import List
 from operator import itemgetter
 import streamlit as st
 
-from config import DATA_DIR, VECTORSTORE_DIR, EMBEDDING_MODEL, LST_LLMS
+from config.config import DATA_DIR, VECTORSTORE_DIR, EMBEDDING_MODEL, LST_LLMS
 
 # ============== Query Transformation ============== #
 from prompt import qa_prompt_system, query_generation_5_prompt_template, contextualize_q_prompt
