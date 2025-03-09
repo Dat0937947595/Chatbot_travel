@@ -5,13 +5,22 @@
 		- Loại các câu hỏi không liên quan
 		- ...
 '''
+
+import os
+import sys
+
+# Thêm thư mục gốc (CHATBOT_TRAVEL) vào sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 ### Import thư viện
 import logging
 from langchain_ollama import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
 import dotenv
-from prompts.query_prompts import *
+# from prompts.query_prompts import *
 from langchain_core.output_parsers import StrOutputParser
+
+from prompts.query_prompts import *
 
 ''' -------------------------------------- '''
 
@@ -27,7 +36,7 @@ logger = logging.getLogger("Query Processing")
 ''' -------------------------------------- '''
 
 ### Hàm refine query dựa trên lịch sử hội thoại
-def refine_query(user_query, chat_history):
+def refine_query(user_query, chat_history, llm):
 	"""
 	Refine câu hỏi của người dùng dựa trên lịch sử hội thoại, sử dụng prompt mới với phương pháp Chain of Thought (CoT).
 	"""
@@ -67,7 +76,7 @@ if __name__ == "__main__":
 	# Refine câu hỏi
 	while True:
 		user_query = input("Nhập câu hỏi của bạn: ")	
-		refined_query = refine_query(user_query, chat_history)
+		refined_query = refine_query(user_query, chat_history, llm)
 		logger.info(f"\nCâu hỏi sau refine: {refined_query}")
 
 		# Kiểm tra trường hợp câu hỏi không rõ ràng - nếu có cần hỏi lại người dùng
