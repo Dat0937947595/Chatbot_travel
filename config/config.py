@@ -15,4 +15,5 @@ VECTORSTORE_DIR = os.path.join(BASE_DIR, "vectorstores", "chroma_db_final_metada
 EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 # List of Large Language Models
-LST_LLMS = ["gemini-1.5-pro", "gemini-1.5-flash", "llama3.1:latest"]
+MODEL_GEMINI = "gemini-2.0-flash"
+MODEL_DEEPSEEK = "deepseek-r1-distill-llama-70b"
