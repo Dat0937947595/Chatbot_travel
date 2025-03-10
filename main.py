@@ -1,4 +1,4 @@
-from libs.chatbot import Chatbot
+from src.chatbot import Chatbot
 
 chatbot = Chatbot()
 
