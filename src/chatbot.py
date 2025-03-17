@@ -43,11 +43,11 @@ class Chatbot:
         self.query = ""
         
         # Khởi tạo vectorstore
-        
         self.vectorstore = Chroma(
             persist_directory=VECTORSTORE_DIR,
             embedding_function=self.embedding_model
         )
+        
         self.retriever = self.vectorstore.as_retriever(
             search_type="mmr",
             search_kwargs={"k": 5}
@@ -63,8 +63,6 @@ class Chatbot:
             prompt=query_generation_prompt_template
         )
         # Định nghĩa các tool==================
-        # Tool tìm kiếm thông tin từ lịch sử
-
         # Tool tìm kiếm thông tin từ lịch sử
         self.tool_memory_agent = Tool(
             name="MemoryAgent",
@@ -111,14 +109,20 @@ class Chatbot:
         # Khởi tạo React Agent
         self.react_agent = create_react_agent(
             llm=self.llm_gemini,
-            tools=[self.tool_memory_agent, self.tool_travel_agent],
+            tools=[
+                self.tool_memory_agent, 
+                self.tool_travel_agent
+                ],
             prompt=main_prompt_template
         )
 
         # Tạo AgentExecutor
         self.agent_search_executor = AgentExecutor(
             agent=self.react_agent,
-            tools=[self.tool_memory_agent, self.tool_travel_agent],
+            tools=[
+                self.tool_memory_agent, 
+                self.tool_travel_agent
+                ],
             memory= self.memory,
             verbose=True,
             handle_parsing_errors=False
@@ -127,21 +131,28 @@ class Chatbot:
         # Khởi tạo React Agent
         self.react_answer_agent = create_react_agent(
             llm=self.llm_gemini,
-            tools=[self.tool_location_info_agent, self.tool_itinerary_planner_agent, self.tool_weather_info_agent, self.tool_travel_faq_agent],
+            tools=[
+                self.tool_location_info_agent, 
+                self.tool_itinerary_planner_agent, 
+                self.tool_weather_info_agent, 
+                self.tool_travel_faq_agent
+                ],
             prompt=answer_main_prompt_template 
         )
 
         # Tạo AgentExecutor nhớ tạo sau mỗi bước dùng tool thì làm cách nào để để reset bộ nhớ lại
         self.agent_answer_travel_executor = AgentExecutor(
             agent=self.react_answer_agent,
-            tools=[self.tool_location_info_agent, self.tool_itinerary_planner_agent, self.tool_weather_info_agent, self.tool_travel_faq_agent],
+            tools=[
+                self.tool_location_info_agent, 
+                self.tool_itinerary_planner_agent, 
+                self.tool_weather_info_agent, 
+                self.tool_travel_faq_agent],
             memory= self.memory,
             verbose=True,
             handle_parsing_errors=False
         )
 
-        
-    
     def get_query(self, query):
         """Lưu trữ truy vấn người dùng."""
         self.query = query
@@ -149,8 +160,11 @@ class Chatbot:
     def chat(self, user_input):
         """Xử lý đầu vào người dùng và trả về phản hồi."""
         self.get_query(user_input)
+        
         self.history_conversation.append({"role": "user", "content": user_input})
         response = self.agent_search_executor.invoke({"input": user_input})
+        
         output_text = response.get("output", "")
         self.history_conversation.append({"role": "assistant", "content": output_text})
+        
         return output_text
