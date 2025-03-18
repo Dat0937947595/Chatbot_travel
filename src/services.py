@@ -1,104 +1,49 @@
+from .utils import *
+import logging
+import requests
 from langchain_core.output_parsers import StrOutputParser
 from langchain.schema.runnable import RunnableLambda
-from .utils import *
-from prompts.prompt_template import *
-from prompts.query_prompts import *
-import logging
+from langchain.prompts import PromptTemplate
 
-# Cấu hình logging
+# import prompt templates
+from prompts.query_history_prompt_template import query_history_prompt_template
+from prompts.location_info_prompt_template import location_info_prompt
+from prompts.itinerary_planner_prompt_template import itinerary_planner_prompt
+
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("Services") # Đổi tên logger từ "Query Processing" sang "Services"
-
-### Hàm refine query dựa trên lịch sử hội thoại
-def refine_query_processing(user_query, chat_history, llm):
-	"""
-	Refine câu hỏi của người dùng dựa trên lịch sử hội thoại, sử dụng prompt mới với phương pháp Chain of Thought (CoT).
-	"""
-	try:
-		logger.info(f"Query: {user_query}")
-		
-		# Thực hiện refine câu hỏi
-		refined_query_chain = (
-			rewrite_query_prompt  # Sử dụng prompt để viết lại câu hỏi
-			| llm  # Sử dụng Large Language Model để sinh output
-			| StrOutputParser()  # Parser để chuyển đổi output về dạng string
-		)
-		
-		refined_query = refined_query_chain.invoke({"chat_history": chat_history, "user_query": user_query})
-	except Exception as e:
-		logger.error(f"Lỗi khi refine query: {e}")
-		# Trường hợp lỗi, giữ nguyên câu hỏi gốc
-		refined_query = user_query
-	
-	return refined_query
-
-def refine_query(chatbot, user_query):
-    """Tinh chỉnh câu hỏi người dùng dựa trên lịch sử hội thoại."""
-    refined_query = refine_query_processing(user_query, chatbot.history_conversation, chatbot.llm_gemini)
-    logger.info(f"\nCâu hỏi sau refine: {refined_query}")
-
-    # Kiểm tra trường hợp câu hỏi không rõ ràng - nếu có cần hỏi lại người dùng
-    if "UNCLEAR" in refined_query:
-        # Trường hợp câu hỏi không rõ ràng, hỏi lại người dùng
-        clarify_query_chain = (
-            clarify_query_prompt  # Sử dụng prompt để hỏi lại câu hỏi
-            | chatbot.llm_gemini  # Sử dụng Large Language Model để sinh output
-            | StrOutputParser()  # Parser để chuyển đổi output về dạng string
-        )
-        refined_query = clarify_query_chain.invoke({"chat_history": chatbot.history_conversation, "unclear_query": refined_query})
-        logger.info(f"\nCâu hỏi sau khi hỏi lại: {refined_query}")
-    
-    # # Kiểm tra trường hợp câu hỏi không liên quan - xuất ra thông báo hỏi người dùng và chuyển hướng về du lịch - không thêm vào lịch sử hội thoại
-    # if "NON_TRAVEL" in refined_query:
-    #     logger.info(f"\nCâu hỏi không liên quan: {refined_query}")
-    # elif "ASK" in refined_query:
-    #     chatbot.history_conversation.append({"role": "user", "content": remove_tags(refined_query)})
-    #     chatbot.history_conversation.append({"role": "assistant", "content": remove_tags(refined_query)})
-    # else:
-    #     # Thêm câu hỏi vào lịch sử hội thoại
-    #     chatbot.history_conversation.append({"role": "user", "content": remove_tags(refined_query)})
-        
-    logger.info(f"Lịch sử hội thoại: {chatbot.history_conversation}\n")
-    
-    if "ASK" in refined_query or "NON_TRAVEL" in refined_query:
-        return remove_tags(refined_query)
-    
-    return handle_next_steps(chatbot, remove_tags(refined_query))
+logger = logging.getLogger("Services")
 
 def query_history(chatbot, query):
-    """Truy vấn thông tin từ lịch sử hội thoại."""
+    chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
     query_history_chain = (
         query_history_prompt_template
         | chatbot.llm_gemini
         | StrOutputParser()
     )
-    response = query_history_chain.invoke({"history": chatbot.history_conversation, "query": query})
-    return response
-
-def summary_history(chatbot, conversation):
-    """Tóm tắt lịch sử hội thoại."""
-    summary_history_chain = (
-        summary_history_prompt_template
-        | chatbot.llm_gemini
-        | StrOutputParser()
-    )
-    response = summary_history_chain.invoke({"history": chatbot.history_conversation, "new_conversation": conversation})
-    return response
-
-def handle_next_steps(chatbot, query):
-    """Xử lý các bước tiếp theo sau khi tinh chỉnh truy vấn."""
-    response = chatbot.agent_answer_travel_executor.invoke({"input": query})
-    return response
+    return query_history_chain.invoke({"history": chat_history, "query": query})
 
 def generate_response(chatbot, user_input, prompt_template_for_query):
-    """Sinh phản hồi dựa trên truy vấn và ngữ cảnh."""
+    """Sinh phản hồi dựa trên truy vấn và ngữ cảnh, sử dụng danh sách câu hỏi từ query_generation_chain."""
     logger.info(f"\nSinh ra câu trả lời từ câu truy vấn: {user_input}\n")
-    cleaned_query_generation = RunnableLambda(lambda x: chatbot.query_generation_chain.invoke({"question": x}).get("text", ""))
+    
+    # Lấy danh sách câu hỏi từ query_generation_chain
+    def get_questions(x):
+        result = chatbot.query_generation_chain.invoke({"question": x})
+        try:
+            
+            logger.info(f"\nKết quả từ query_generation_chain: {result}\n")
+            # Lấy danh sách câu hỏi từ key "questions"
+            return result["questions"]
+        except (KeyError, TypeError) as e:
+            logger.error(f"Lỗi khi xử lý output từ query_generation_chain: {e}")
+            return [x]  # Trả về câu hỏi gốc nếu có lỗi
+    
+    cleaned_query_generation = RunnableLambda(get_questions)
     
     retrieval_chain_rag_fusion = (
         cleaned_query_generation
-        | chatbot.retriever.map()
-        | RunnableLambda(lambda results: reciprocal_rank_fusion(results))
+        | chatbot.retriever.map()  # Áp dụng retriever cho từng câu hỏi trong danh sách
+        | RunnableLambda(lambda results: reciprocal_rank_fusion(results))  # Gộp kết quả
     )
     
     def format_input(inputs):
@@ -116,23 +61,91 @@ def generate_response(chatbot, user_input, prompt_template_for_query):
     
     return final_rag_chain.invoke({"question": user_input})
 
-### Các hàm xử lý khi gọi các tool cho 4 chủ đề
 def location_info_function(chatbot, query):
-    print("Nhánh location_info_function")
-    response = generate_response(chatbot= chatbot, user_input= query, prompt_template_for_query= location_info_prompt)
-    return response
+    return generate_response(chatbot, query, location_info_prompt)
 
 def itinerary_planner_function(chatbot, query):
-    print("Nhánh itinerary_planner_function")
-    response = generate_response(chatbot= chatbot, user_input= query, prompt_template_for_query= itinerary_planner_prompt)
+    return generate_response(chatbot, query, itinerary_planner_prompt)
+
+def greetings_function(chatbot, user_input):
+    """Sinh phản hồi tự nhiên cho các câu chào hỏi hoặc giao tiếp xã giao bằng LLM Gemini."""
+    # Tạo prompt dưới dạng PromptTemplate
+    greeting_prompt_template = PromptTemplate(
+        input_variables=["chat_history", "question"],
+        template="""
+        Bạn là một trợ lý thân thiện. Hãy trả lời câu chào hỏi hoặc giao tiếp xã giao từ người dùng một cách tự nhiên, lịch sự dựa trên câu hỏi và ngữ cảnh lịch sử hội thoại.
+        Lịch sử hội thoại: {chat_history}
+        Câu hỏi: {question}
+        Trả về phản hồi ngắn gọn, thân thiện.
+        """
+    )
+    
+    # Tạo chain: PromptTemplate -> LLM Gemini -> string output
+    greeting_chain = (
+        greeting_prompt_template
+        | chatbot.llm_gemini
+        | StrOutputParser()
+    )
+    
+    # Lấy lịch sử hội thoại từ memory
+    chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
+    
+    # Gọi chain với input là dict chứa chat_history và question",
+    response = greeting_chain.invoke({"chat_history": chat_history, "question": user_input})
+    return response
+
+def not_relevant_function(chatbot, user_input):
+    """Phản hồi khi câu hỏi không liên quan đến du lịch."""
+    # Tạo prompt dưới dạng PromptTemplate
+    not_relevant_prompt_template = PromptTemplate(
+        input_variables=["question"],
+        template="""
+        Bạn là một trợ lý du lịch thông minh, chỉ hỗ trợ các câu hỏi về du lịch hoặc giao tiếp xã giao.
+        Câu hỏi của người dùng: {question}
+        Hãy từ chối nhẹ nhàng nếu câu hỏi không liên quan đến du lịch, và gợi ý họ hỏi về du lịch.
+        Trả về phản hồi ngắn gọn.
+        """
+    )
+    
+    # Tạo chain: PromptTemplate -> LLM Gemini -> string output
+    not_relevant_chain = (
+        not_relevant_prompt_template
+        | chatbot.llm_gemini
+        | StrOutputParser()
+    )
+    
+    # Gọi chain với input là dict chứa question
+    response = not_relevant_chain.invoke({"question": user_input})
     return response
 
 def weather_info_function(chatbot, query):
-    print("Nhánh weather_info_function")
-    response = generate_response(chatbot= chatbot, user_input= query, prompt_template_for_query= weather_info_prompt)
-    return response
+    # try:
+    #     api_key = os.getenv("OPENWEATHER_API_KEY")
+    #     location = extract_location(query)
+    #     url = f"http://api.openweathermap.org/data/2.5/weather?q={location}&appid={api_key}&units=metric"
+    #     response = requests.get(url).json()
+    #     return f"Thời tiết tại {location}: {response['main']['temp']}°C, {response['weather'][0]['description']}."
+    # except Exception as e:
+    #     return f"Không thể lấy thông tin thời tiết: {str(e)}"
+    
+    return "Thời tiết tại Đà Nẵng: 30°C, nắng nhẹ."
 
-def travel_faq_function(chatbot, query):
-    print("Nhánh travel_faq_function")
-    response = generate_response(chatbot= chatbot, user_input= query, prompt_template_for_query= travel_faq_prompt)
-    return response
+def price_search_function(chatbot, query):
+    # try:
+    #     api_key = os.getenv("AMADEUS_API_KEY")
+    #     origin, destination, date = extract_flight_info(query)
+    #     url = f"https://api.amadeus.com/v2/shopping/flight-offers?origin={origin}&destination={destination}&departureDate={date}&apiKey={api_key}"
+    #     response = requests.get(url).json()
+    #     price = response['data'][0]['price']['total']
+    #     return f"Giá vé từ {origin} đến {destination} ngày {date}: {price} VND"
+    # except Exception as e:
+    #     return f"Không thể tìm giá vé: {str(e)}"
+    return "Giá vé từ Hà Nội đến Đà Nẵng ngày 20/3/2025: 1.2 triệu VND."
+
+def budget_calculator_function(chatbot, query):
+    # Giả lập, bạn cần triển khai chi tiết dựa trên dữ liệu
+    return "Chi phí ước tính: 5 triệu VND cho 3 ngày ở Đà Nẵng (chưa tính vé)."
+
+def transport_info_function(chatbot, query):
+    # Giả lập, cần dữ liệu thực tế
+    return "Từ Hà Nội đến Huế: Máy bay (1.5 giờ, 1.5 triệu), Tàu (12 giờ, 500k)."

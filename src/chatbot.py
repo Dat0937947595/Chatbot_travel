@@ -1,11 +1,13 @@
 import os
 import sys
+from functools import partial
+from dotenv import load_dotenv
+import logging
 
 # Thêm thư mục gốc (CHATBOT_TRAVEL) vào sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Import bên ngoài (package, lib)
-import dotenv
+# Import từ LangChain và các thư viện khác
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
@@ -13,158 +15,151 @@ from langchain.memory import ConversationBufferMemory
 from langchain.tools import Tool
 from langchain.agents import AgentExecutor, create_react_agent
 from langchain.chains import LLMChain
-from langchain_groq import ChatGroq
-from functools import partial
-from dotenv import load_dotenv
-import logging
+from langchain_core.output_parsers import JsonOutputParser
 
 # Import nội bộ project
-from config.config import *
+from config.config import VECTORSTORE_DIR  # Giả sử bạn đã định nghĩa các hằng số trong config
 from src.services import *
-from prompts.prompt_template import *
-from src.model import *
+
+# Import các prompt template
+from prompts.main_prompt_template import main_prompt_template
+from prompts.query_generation_prompt_template import query_generation_prompt_template
+
+from src.model import Model
+
 # Cấu hình logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("Query Processing")
+logger = logging.getLogger("Chatbot")
 
-# Cấu hình môi trường
-# dotenv.load_dotenv("api.env")
+# Load biến môi trường
 load_dotenv()
 
 class Chatbot:
-    def __init__(self):
+    def __init__(self, verbose=False):
+        """Khởi tạo chatbot với các thành phần cần thiết."""
+        # Khởi tạo model và các thành phần LLM, embedding
         self.model = Model()
-        # Khởi tạo LLM và embedding
         self.llm_gemini = self.model.get_llm_gemini()
         self.embedding_model = self.model.get_embedding()
 
-        # Biến lưu trữ lịch sử hội thoại và truy vấn
-        self.history_conversation = []
+        # Lịch sử hội thoại và truy vấn
         self.query = ""
-        
-        # Khởi tạo vectorstore
-        self.vectorstore = Chroma(
-            persist_directory=VECTORSTORE_DIR,
-            embedding_function=self.embedding_model
-        )
-        
-        self.retriever = self.vectorstore.as_retriever(
-            search_type="mmr",
-            search_kwargs={"k": 5}
-        )
-
         self.memory = ConversationBufferMemory(
             memory_key="chat_history",
             return_messages=True
         )
 
-        self.query_generation_chain = LLMChain(
+        # Khởi tạo vectorstore
+        self.vectorstore = Chroma(
+            persist_directory=VECTORSTORE_DIR,
+            embedding_function=self.embedding_model
+        )
+        self.retriever = self.vectorstore.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k": 5}
+        )
+
+        # Chain để tinh chỉnh truy vấn
+        self.query_generation_chain = query_generation_prompt_template | self.llm_gemini | JsonOutputParser()
+
+        # Khởi tạo tools và agent
+        self.tools = self._initialize_tools()
+        self.agent = self._initialize_agent(verbose=verbose)
+        self.executor = AgentExecutor(
+            agent=self.agent,
+            tools=self.tools,
+            memory=self.memory,
+            verbose=verbose,  # Tùy chọn bật/tắt log chi tiết
+            handle_parsing_errors=True  # Tự động xử lý lỗi parsing
+        )
+
+    def _initialize_tools(self):
+        return [
+            Tool(
+                name="GreetingsAgent", 
+                func=partial(greetings_function, self), 
+                description="Xử lý chào hỏi, giao tiếp."
+                ),
+            
+            Tool(
+                name="NotrelevantTravelAgent", 
+                func=partial(not_relevant_function, self), 
+                description="Xử lý câu hỏi không liên quan du lịch."
+                ),
+            
+            Tool(
+                name="MemoryAgent", 
+                func=partial(query_history, self), 
+                description="Kiểm tra lịch sử và viết lại câu hỏi."
+                ),
+            
+            Tool(
+                name="LocationAgent", 
+                func=partial(location_info_function, self), 
+                description="Thông tin chung về địa điểm, khu vui chơi, món ăn nổi tiếng, ..."
+                ),
+            
+            Tool(
+                name="PriceSearchAgent", 
+                func=partial(price_search_function, self), 
+                description="Thông tin giá vé khu vui chơi, khách sạn, ..."
+                ),
+            
+            Tool(
+                name="WeatherAgent", 
+                func=partial(weather_info_function, self),
+                description="Thời tiết."
+                ),
+            
+            Tool(
+                name="PlanAgent", 
+                func=partial(itinerary_planner_function, self), 
+                description="Lập kế hoạch."
+                ),
+            
+            Tool(
+                name="BudgetAgent", 
+                func=partial(budget_calculator_function, self),
+                description="Ngân sách."
+                ),
+            
+            Tool(
+                name="TransportAgent", 
+                func=partial(transport_info_function, self),
+                description="Phương tiện di chuyển."
+                )
+        ]
+
+    def _initialize_agent(self, verbose=False):
+        """Khởi tạo React Agent."""
+        return create_react_agent(
             llm=self.llm_gemini,
-            prompt=query_generation_prompt_template
-        )
-        # Định nghĩa các tool==================
-        # Tool tìm kiếm thông tin từ lịch sử
-        self.tool_memory_agent = Tool(
-            name="MemoryAgent",
-            func=partial(query_history, self),
-            description="Tìm kiếm thông tin trong lịch sử trò chuyện."
-        )
-
-        # Tool tinh chỉnh truy vấn du lịch
-        self.tool_travel_agent = Tool(
-            name="TravelAgent",
-            func=partial(refine_query, self),
-            description="Tìm kiếm những thông tin liên quan đến du lịch."
-        )
-
-        # Tool cung cấp thông tin địa điểm du lịch
-        self.tool_location_info_agent = Tool(
-            name="LocationAgent",
-            func=partial(location_info_function, self),
-            description="Cung cấp thông tin về địa điểm du lịch, bao gồm mô tả, lịch sử, điểm tham quan nổi bật và cách di chuyển."
-        )
-
-        # Tool lập kế hoạch du lịch
-        self.tool_itinerary_planner_agent = Tool(
-            name="PlanAgent",
-            func=partial(itinerary_planner_function, self),  # Dùng hàm riêng để lên lịch trình
-            description="Hỗ trợ lên lịch trình du lịch chi tiết theo sở thích, thời gian và địa điểm người dùng cung cấp."
-        )
-
-        # Tool cung cấp thông tin thời tiết
-        self.tool_weather_info_agent = Tool(
-            name="WeatherAgent",
-            func=partial(weather_info_function, self),  # Dùng hàm riêng lấy dữ liệu thời tiết
-            description="Cung cấp thông tin thời tiết tại các địa điểm du lịch, bao gồm nhiệt độ, độ ẩm và dự báo thời tiết."
-        )
-
-        # Tool giải đáp câu hỏi về du lịch
-        self.tool_travel_faq_agent = Tool(
-            name="TravelFAQAgent",
-            func=partial(travel_faq_function, self),  # Dùng hàm riêng để trả lời FAQ
-            description="Giải đáp các câu hỏi thường gặp về du lịch, kinh nghiệm và mẹo giúp chuyến đi suôn sẻ hơn."
-        )
-
-
-        # Khởi tạo React Agent
-        self.react_agent = create_react_agent(
-            llm=self.llm_gemini,
-            tools=[
-                self.tool_memory_agent, 
-                self.tool_travel_agent
-                ],
+            tools=self.tools,
             prompt=main_prompt_template
-        )
-
-        # Tạo AgentExecutor
-        self.agent_search_executor = AgentExecutor(
-            agent=self.react_agent,
-            tools=[
-                self.tool_memory_agent, 
-                self.tool_travel_agent
-                ],
-            memory= self.memory,
-            verbose=True,
-            handle_parsing_errors=False
-        )
-
-        # Khởi tạo React Agent
-        self.react_answer_agent = create_react_agent(
-            llm=self.llm_gemini,
-            tools=[
-                self.tool_location_info_agent, 
-                self.tool_itinerary_planner_agent, 
-                self.tool_weather_info_agent, 
-                self.tool_travel_faq_agent
-                ],
-            prompt=answer_main_prompt_template 
-        )
-
-        # Tạo AgentExecutor nhớ tạo sau mỗi bước dùng tool thì làm cách nào để để reset bộ nhớ lại
-        self.agent_answer_travel_executor = AgentExecutor(
-            agent=self.react_answer_agent,
-            tools=[
-                self.tool_location_info_agent, 
-                self.tool_itinerary_planner_agent, 
-                self.tool_weather_info_agent, 
-                self.tool_travel_faq_agent],
-            memory= self.memory,
-            verbose=True,
-            handle_parsing_errors=False
         )
 
     def get_query(self, query):
         """Lưu trữ truy vấn người dùng."""
         self.query = query
-    
+
     def chat(self, user_input):
         """Xử lý đầu vào người dùng và trả về phản hồi."""
-        self.get_query(user_input)
-        
-        self.history_conversation.append({"role": "user", "content": user_input})
-        response = self.agent_search_executor.invoke({"input": user_input})
-        
-        output_text = response.get("output", "")
-        self.history_conversation.append({"role": "assistant", "content": output_text})
-        
-        return output_text
+        try:
+            self.get_query(user_input)
+            logger.info(f"Processing user input: {user_input}")
+
+            # Gọi agent để xử lý truy vấn
+            response = self.executor.invoke({"input": user_input})
+            output_text = response.get("output", "Không có phản hồi từ agent.")
+
+            logger.info(f"Generated response: {output_text}")
+            return output_text
+
+        except Exception as e:
+            logger.error(f"Error processing query: {str(e)}")
+            return f"Đã xảy ra lỗi: {str(e)}"
+
+    def reset_memory(self):
+        """Xóa bộ nhớ hội thoại."""
+        self.memory.clear()
+        logger.info("Conversation memory has been reset.")
