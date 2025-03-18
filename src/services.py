@@ -149,3 +149,61 @@ def budget_calculator_function(chatbot, query):
 def transport_info_function(chatbot, query):
     # Giả lập, cần dữ liệu thực tế
     return "Từ Hà Nội đến Huế: Máy bay (1.5 giờ, 1.5 triệu), Tàu (12 giờ, 500k)."
+
+
+### ==================== WeatherAPIWrapper ==================== ###
+class WeatherAPIWrapper:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.base_url = "http://api.openweathermap.org/data/2.5/weather"
+
+    def get_weather(self, location):
+        params = {
+            "q": location,
+            "appid": self.api_key,
+            "units": "metric",  # Đơn vị độ C
+            "lang": "vi"  # Ngôn ngữ tiếng Việt
+        }
+
+        try:
+            response = requests.get(self.base_url, params=params)
+            data = response.json()
+
+            if response.status_code == 200:
+                weather_desc = data["weather"][0]["description"].capitalize()
+                temp = data["main"]["temp"]
+                humidity = data["main"]["humidity"]
+                wind_speed = data["wind"]["speed"]
+
+                return (
+                    f"Thời tiết tại {location}: {weather_desc}.\n"
+                    f"Nhiệt độ: {temp}°C, Độ ẩm: {humidity}%, Gió: {wind_speed} m/s."
+                )
+            else:
+                return f"Không tìm thấy thông tin thời tiết cho {location}."
+        except Exception as e:
+            return f"Lỗi khi gọi API thời tiết: {str(e)}"
+
+# Thay API_KEY bằng khóa API thực của bạn
+API_KEY = "b13f85eb589c453522bb1322a6763a8d"
+weather_api = WeatherAPIWrapper(API_KEY)
+
+"""
+    cau hoi: "Thời tiết tại Hà Nội bây giờ thế nào?"
+    -> get_location -> "Hà Nội" -> get_weather("Hà Nội")
+    
+    
+"""
+
+
+
+
+
+
+
+
+
+
+
+
+

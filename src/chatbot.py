@@ -34,6 +34,10 @@ logger = logging.getLogger("Chatbot")
 # Load biến môi trường
 load_dotenv()
 
+# Thay API_KEY bằng khóa API thực của bạn
+API_KEY = "b13f85eb589c453522bb1322a6763a8d"
+weather_api = WeatherAPIWrapper(API_KEY)
+
 class Chatbot:
     def __init__(self, verbose=False):
         """Khởi tạo chatbot với các thành phần cần thiết."""
@@ -105,11 +109,18 @@ class Chatbot:
                 description="Thông tin giá vé khu vui chơi, khách sạn, ..."
                 ),
             
+            # Tool(
+            #     name="WeatherAgent", 
+            #     func=partial(weather_info_function, self),
+            #     description="Thời tiết."
+            #     ),
+            
+            # Thiết lập tool
             Tool(
-                name="WeatherAgent", 
-                func=partial(weather_info_function, self),
-                description="Thời tiết."
-                ),
+                name="Weather Search",
+                func=weather_api.get_weather,
+                description="Tìm kiếm thông tin thời tiết hiện tại cho một thành phố hoặc địa điểm."
+            )
             
             Tool(
                 name="PlanAgent", 
