@@ -22,8 +22,6 @@ main_prompt = """Bạn là một trợ lý du lịch thông minh. Nhiệm vụ c
       - `PriceSearchAgent`: Giá vé, khách sạn.
       - `WeatherAgent`: Thời tiết.
       - `PlanAgent`: Lập kế hoạch.
-      - `BudgetAgent`: Ngân sách.
-      - `TransportAgent`: Phương tiện di chuyển.
    - Nếu không có cờ: `Final Answer: <Kết quả từ công cụ>`.
 
 3. **Định dạng**:

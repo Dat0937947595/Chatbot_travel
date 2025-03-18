@@ -34,3 +34,10 @@
 ### File ở thư mục gốc
 - **`main.py`**: Điểm chạy chính của ứng dụng, khởi tạo `Chatbot` và xử lý đầu vào người dùng.  
 - **`requirements.txt`**: Danh sách các thư viện cần thiết để chạy dự án.
+
+
+### test_search.py
+
+- Tìm thông tin giá + trả về trang web
+
+ví dụ: bạn hãy cho tôi thông tin về giá xe đi cần thơ hậu giang và trang web đặt nó?

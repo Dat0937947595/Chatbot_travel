@@ -142,14 +142,6 @@ def price_search_function(chatbot, query):
     #     return f"Không thể tìm giá vé: {str(e)}"
     return "Giá vé từ Hà Nội đến Đà Nẵng ngày 20/3/2025: 1.2 triệu VND."
 
-def budget_calculator_function(chatbot, query):
-    # Giả lập, bạn cần triển khai chi tiết dựa trên dữ liệu
-    return "Chi phí ước tính: 5 triệu VND cho 3 ngày ở Đà Nẵng (chưa tính vé)."
-
-def transport_info_function(chatbot, query):
-    # Giả lập, cần dữ liệu thực tế
-    return "Từ Hà Nội đến Huế: Máy bay (1.5 giờ, 1.5 triệu), Tàu (12 giờ, 500k)."
-
 
 ### ==================== WeatherAPIWrapper ==================== ###
 class WeatherAPIWrapper:

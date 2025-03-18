@@ -127,18 +127,6 @@ class Chatbot:
                 func=partial(itinerary_planner_function, self), 
                 description="Lập kế hoạch."
                 ),
-            
-            Tool(
-                name="BudgetAgent", 
-                func=partial(budget_calculator_function, self),
-                description="Ngân sách."
-                ),
-            
-            Tool(
-                name="TransportAgent", 
-                func=partial(transport_info_function, self),
-                description="Phương tiện di chuyển."
-                )
         ]
 
     def _initialize_agent(self, verbose=False):
