@@ -1,14 +1,20 @@
 from .utils import *
 import logging
 import requests
+import time
 from langchain_core.output_parsers import StrOutputParser
 from langchain.schema.runnable import RunnableLambda
 from langchain.prompts import PromptTemplate
+
+from langchain_community.utilities import GoogleSearchAPIWrapper
+from langchain.document_loaders import WebBaseLoader
+from pydantic import Field
 
 # import prompt templates
 from prompts.query_history_prompt_template import query_history_prompt_template
 from prompts.location_info_prompt_template import location_info_prompt
 from prompts.itinerary_planner_prompt_template import itinerary_planner_prompt
+from prompts.search_price_prompt import price_prompt_template
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Services")
@@ -130,25 +136,63 @@ def weather_info_function(chatbot, query):
     
     return "Thời tiết tại Đà Nẵng: 30°C, nắng nhẹ."
 
+class CustomGoogleSearchAPIWrapperContent(GoogleSearchAPIWrapper):
+    def __init__(self, google_api_key=None, google_cse_id=None, **kwargs):
+        google_api_key = google_api_key or "AIzaSyCxKATX40xEOqEZCAtusTIdlXk7Z9C74KE"
+        google_cse_id = google_cse_id or "033cd3a8777fa4c8d"
+
+        kwargs.setdefault("google_api_key", google_api_key)
+        kwargs.setdefault("google_cse_id", google_cse_id)
+
+        super().__init__(**kwargs)
+
+    def get_page_content(self, url):
+        """Sử dụng WebBaseLoader để lấy toàn bộ nội dung trang web."""
+        try:
+            loader = WebBaseLoader(url)
+            docs = loader.load()  # Load trang web thành danh sách Document
+            return docs[0].page_content if docs else None  # Lấy nội dung của trang đầu tiên
+        except Exception as e:
+            print(f"Lỗi khi tải nội dung từ {url}: {e}")
+            return None
+
+    def run(self, query):
+
+        search_results = self.results(query, num_results=3)
+        if not search_results:
+            print("Không tìm thấy kết quả nào!")
+            return {"content": "Không tìm thấy kết quả phù hợp.", "references": []}
+
+        content_list = []
+        references = []
+
+        for result in search_results:
+            url = result["link"]
+            references.append(url)
+            
+            time.sleep(1.5)  # Chờ 1.5 giây giữa mỗi request để tránh bị giới hạn
+
+            page_text = self.get_page_content(url)
+            if page_text:
+                content_list.append(f"🔹 {result['title']} ({url}):\n{page_text}\n")
+            else:
+                content_list.append(f"🔹 {result['title']} ({url}): Không thể lấy dữ liệu.\n")
+
+        full_content = "\n\n".join(content_list)  # Ghép nội dung từ nhiều trang lại
+
+        return {"answer": full_content, "references": references}
+
+search_price_tool = CustomGoogleSearchAPIWrapperContent()
+
 def price_search_function(chatbot, query):
-    # try:
-    #     api_key = os.getenv("AMADEUS_API_KEY")
-    #     origin, destination, date = extract_flight_info(query)
-    #     url = f"https://api.amadeus.com/v2/shopping/flight-offers?origin={origin}&destination={destination}&departureDate={date}&apiKey={api_key}"
-    #     response = requests.get(url).json()
-    #     price = response['data'][0]['price']['total']
-    #     return f"Giá vé từ {origin} đến {destination} ngày {date}: {price} VND"
-    # except Exception as e:
-    #     return f"Không thể tìm giá vé: {str(e)}"
-    return "Giá vé từ Hà Nội đến Đà Nẵng ngày 20/3/2025: 1.2 triệu VND."
-
-def budget_calculator_function(chatbot, query):
-    # Giả lập, bạn cần triển khai chi tiết dựa trên dữ liệu
-    return "Chi phí ước tính: 5 triệu VND cho 3 ngày ở Đà Nẵng (chưa tính vé)."
-
-def transport_info_function(chatbot, query):
-    # Giả lập, cần dữ liệu thực tế
-    return "Từ Hà Nội đến Huế: Máy bay (1.5 giờ, 1.5 triệu), Tàu (12 giờ, 500k)."
+    query += " mới nhất"
+    # Nên có cái viết lại câu cho những câu tìm đường dẫn
+    document = search_price_tool.run(query)
+    document_str = json.dumps(document, ensure_ascii=False, indent=2)  
+    llm_chain = price_prompt_template | chatbot.llm_gemini | StrOutputParser()
+    print(document_str)
+    response = llm_chain.invoke({"input": query, "documents": document_str})
+    return response
 
 
 ### ==================== WeatherAPIWrapper ==================== ###

@@ -106,7 +106,7 @@ class Chatbot:
             Tool(
                 name="PriceSearchAgent", 
                 func=partial(price_search_function, self), 
-                description="Thông tin giá vé khu vui chơi, khách sạn, ..."
+                description="Thông tin giá các dịch vụ du lịch và trang web của những dịch vụ du lịch"
                 ),
             
             # Tool(
@@ -120,25 +120,13 @@ class Chatbot:
                 name="Weather Search",
                 func=weather_api.get_weather,
                 description="Tìm kiếm thông tin thời tiết hiện tại cho một thành phố hoặc địa điểm."
-            )
+            ),
             
             Tool(
                 name="PlanAgent", 
                 func=partial(itinerary_planner_function, self), 
                 description="Lập kế hoạch."
                 ),
-            
-            Tool(
-                name="BudgetAgent", 
-                func=partial(budget_calculator_function, self),
-                description="Ngân sách."
-                ),
-            
-            Tool(
-                name="TransportAgent", 
-                func=partial(transport_info_function, self),
-                description="Phương tiện di chuyển."
-                )
         ]
 
     def _initialize_agent(self, verbose=False):
