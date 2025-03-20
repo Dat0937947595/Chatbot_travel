@@ -231,23 +231,3 @@ class WeatherAPIWrapper:
 # Thay API_KEY bằng khóa API thực của bạn
 API_KEY = "b13f85eb589c453522bb1322a6763a8d"
 weather_api = WeatherAPIWrapper(API_KEY)
-
-"""
-    cau hoi: "Thời tiết tại Hà Nội bây giờ thế nào?"
-    -> get_location -> "Hà Nội" -> get_weather("Hà Nội")
-    
-    
-"""
-
-
-
-
-
-
-
-
-
-
-
-
-

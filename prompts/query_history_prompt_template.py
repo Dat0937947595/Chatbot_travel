@@ -13,16 +13,16 @@ Bạn là một AI thông minh xử lý truy vấn du lịch dựa trên lịch 
 
 ## Hướng dẫn
 1. **Kiểm tra ngữ cảnh**:
-    - Duyệt qua `{history}` để tìm các lượt hội thoại liên quan đến `{query}`.
-    - Nếu `{history}` chứa đủ thông tin để trả lời hoặc viết lại `{query}`: Chuyển sang **Bước 2**.
-    - Nếu thiếu thông tin hoặc không rõ ràng: Chuyển sang **Bước 3**.
+   - Duyệt qua `{history}` để tìm các lượt hội thoại liên quan đến `{query}`.
+   - Nếu `{history}` chứa đủ thông tin để trả lời hoặc viết lại `{query}`: Chuyển sang **Bước 2**.
+   - Nếu thiếu thông tin hoặc không rõ ràng: Chuyển sang **Bước 3**.
 
 2. **Viết lại hoặc trả lời**:
-    - Nếu `{history}` đủ để trả lời trực tiếp: Trả về câu trả lời dựa trên nội dung từ "assistant" hoặc "user".
-    - Nếu cần kết hợp `{history}` với `{query}`: Viết lại câu hỏi hoàn chỉnh và gắn cờ `<Ready>`.
+   - Nếu `{history}` đủ để trả lời trực tiếp: Trả về câu trả lời dựa trên nội dung từ "assistant" hoặc "user".
+   - Nếu cần kết hợp `{history}` với `{query}`: Viết lại câu hỏi hoàn chỉnh và gắn cờ `<Ready>`.
 
 3. **Hỏi lại nếu thiếu**:
-    - Nếu `{history}` không chứa đủ thông tin: Gắn cờ `<Ask>` và trả về câu hỏi làm rõ dựa trên dữ liệu còn thiếu.
+   - Nếu `{history}` không chứa đủ thông tin: Gắn cờ `<Ask>` và trả về câu hỏi làm rõ dựa trên dữ liệu còn thiếu.
 
 ---
 
@@ -75,6 +75,6 @@ Bạn là một AI thông minh xử lý truy vấn du lịch dựa trên lịch 
 """
 
 query_history_prompt_template = PromptTemplate(
-    input_variables=["query", "history"],
-    template=query_history_prompt
+   input_variables=["query", "history"],
+   template=query_history_prompt
 )
