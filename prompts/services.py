@@ -1,0 +1,356 @@
+from .utils import *
+import logging
+import requests
+import time
+from langchain_core.output_parsers import StrOutputParser
+from langchain.schema.runnable import RunnableLambda
+from langchain.prompts import PromptTemplate
+
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+
+from langchain_community.utilities import GoogleSearchAPIWrapper
+from langchain.document_loaders import WebBaseLoader
+from pydantic import Field
+
+# import prompt templates
+from prompts.query_history_prompt_template import query_history_prompt_template
+from prompts.location_info_prompt_template import location_info_prompt
+from prompts.itinerary_planner_prompt_template import itinerary_planner_prompt
+from prompts.search_price_prompt import price_prompt_template
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("Services")
+
+def query_history(chatbot, query):
+    chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
+    query_history_chain = (
+        query_history_prompt_template
+        | chatbot.llm_gemini
+        | StrOutputParser()
+    )
+    return query_history_chain.invoke({"history": chat_history, "query": query})
+
+def generate_response(chatbot, user_input, prompt_template_for_query):
+    """Sinh phản hồi dựa trên truy vấn và ngữ cảnh, sử dụng danh sách câu hỏi từ query_generation_chain."""
+    logger.info(f"\nSinh ra câu trả lời từ câu truy vấn: {user_input}\n")
+    
+    # Lấy danh sách câu hỏi từ query_generation_chain
+    def get_questions(x):
+        result = chatbot.query_generation_chain.invoke({"question": x})
+        try:
+            
+            logger.info(f"\nKết quả từ query_generation_chain: {result}\n")
+            # Lấy danh sách câu hỏi từ key "questions"
+            return result["questions"]
+        except (KeyError, TypeError) as e:
+            logger.error(f"Lỗi khi xử lý output từ query_generation_chain: {e}")
+            return [x]  # Trả về câu hỏi gốc nếu có lỗi
+    
+    cleaned_query_generation = RunnableLambda(get_questions)
+    
+    retrieval_chain_rag_fusion = (
+        cleaned_query_generation
+        | chatbot.retriever.map()  # Áp dụng retriever cho từng câu hỏi trong danh sách
+        | RunnableLambda(lambda results: reciprocal_rank_fusion(results))  # Gộp kết quả
+    )
+    
+    def format_input(inputs):
+        context_result = retrieval_chain_rag_fusion.invoke(inputs)
+        return {"retrieved_context": context_result, "question": inputs["question"]}
+    
+    formatted_prompt = RunnableLambda(lambda x: prompt_template_for_query.format(**x))
+    
+    final_rag_chain = (
+        RunnableLambda(format_input)
+        | formatted_prompt
+        | chatbot.llm_gemini
+        | StrOutputParser()
+    )
+    
+    return final_rag_chain.invoke({"question": user_input})
+
+def location_info_function(chatbot, query):
+    return generate_response(chatbot, query, location_info_prompt)
+
+def itinerary_planner_function(chatbot, query):
+    return generate_response(chatbot, query, itinerary_planner_prompt)
+
+def greetings_function(chatbot, user_input):
+    """Sinh phản hồi tự nhiên cho các câu chào hỏi hoặc giao tiếp xã giao bằng LLM Gemini."""
+    # Tạo prompt dưới dạng PromptTemplate
+    greeting_prompt_template = PromptTemplate(
+        input_variables=["chat_history", "question"],
+        template="""
+        Bạn là một trợ lý thân thiện. Hãy trả lời câu chào hỏi hoặc giao tiếp xã giao từ người dùng một cách tự nhiên, lịch sự dựa trên câu hỏi và ngữ cảnh lịch sử hội thoại.
+        Lịch sử hội thoại: {chat_history}
+        Câu hỏi: {question}
+        Trả về phản hồi ngắn gọn, thân thiện.
+        """
+    )
+    
+    # Tạo chain: PromptTemplate -> LLM Gemini -> string output
+    greeting_chain = (
+        greeting_prompt_template
+        | chatbot.llm_gemini
+        | StrOutputParser()
+    )
+    
+    # Lấy lịch sử hội thoại từ memory
+    chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
+    
+    # Gọi chain với input là dict chứa chat_history và question",
+    response = greeting_chain.invoke({"chat_history": chat_history, "question": user_input})
+    return response
+
+def not_relevant_function(chatbot, user_input):
+    """Phản hồi khi câu hỏi không liên quan đến du lịch."""
+    # Tạo prompt dưới dạng PromptTemplate
+    not_relevant_prompt_template = PromptTemplate(
+        input_variables=["question"],
+        template="""
+        Bạn là một trợ lý du lịch thông minh, chỉ hỗ trợ các câu hỏi về du lịch hoặc giao tiếp xã giao.
+        Câu hỏi của người dùng: {question}
+        Hãy từ chối nhẹ nhàng nếu câu hỏi không liên quan đến du lịch, và gợi ý họ hỏi về du lịch.
+        Trả về phản hồi ngắn gọn.
+        """
+    )
+    
+    # Tạo chain: PromptTemplate -> LLM Gemini -> string output
+    not_relevant_chain = (
+        not_relevant_prompt_template
+        | chatbot.llm_gemini
+        | StrOutputParser()
+    )
+    
+    # Gọi chain với input là dict chứa question
+    response = not_relevant_chain.invoke({"question": user_input})
+    return response
+
+def weather_info_function(chatbot, query):
+    # try:
+    #     api_key = os.getenv("OPENWEATHER_API_KEY")
+    #     location = extract_location(query)
+    #     url = f"http://api.openweathermap.org/data/2.5/weather?q={location}&appid={api_key}&units=metric"
+    #     response = requests.get(url).json()
+    #     return f"Thời tiết tại {location}: {response['main']['temp']}°C, {response['weather'][0]['description']}."
+    # except Exception as e:
+    #     return f"Không thể lấy thông tin thời tiết: {str(e)}"
+    
+    return "Thời tiết tại Đà Nẵng: 30°C, nắng nhẹ."
+
+# class CustomGoogleSearchAPIWrapperContent(GoogleSearchAPIWrapper):
+#     def __init__(self, google_api_key=None, google_cse_id=None, **kwargs):
+#         google_api_key = google_api_key or "AIzaSyCxKATX40xEOqEZCAtusTIdlXk7Z9C74KE"
+#         google_cse_id = google_cse_id or "033cd3a8777fa4c8d"
+
+#         kwargs.setdefault("google_api_key", google_api_key)
+#         kwargs.setdefault("google_cse_id", google_cse_id)
+
+#         super().__init__(**kwargs)
+
+#     def get_page_content(self, url):
+#         """Sử dụng WebBaseLoader để lấy toàn bộ nội dung trang web."""
+#         try:
+#             loader = WebBaseLoader(url)
+#             docs = loader.load()  # Load trang web thành danh sách Document
+#             return docs[0].page_content if docs else None  # Lấy nội dung của trang đầu tiên
+#         except Exception as e:
+#             print(f"Lỗi khi tải nội dung từ {url}: {e}")
+#             return None
+
+#     def run(self, query):
+
+#         search_results = self.results(query, num_results=5)
+#         if not search_results:
+#             print("Không tìm thấy kết quả nào!")
+#             return {"content": "Không tìm thấy kết quả phù hợp.", "references": []}
+
+#         content_list = []
+#         references = []
+
+#         for result in search_results:
+#             url = result["link"]
+#             references.append(url)
+            
+#             time.sleep(1.5)  # Chờ 1.5 giây giữa mỗi request để tránh bị giới hạn
+
+#             page_text = self.get_page_content(url)
+#             if page_text:
+#                 content_list.append(f"🔹 {result['title']} ({url}):\n{page_text}\n")
+#             else:
+#                 content_list.append(f"🔹 {result['title']} ({url}): Không thể lấy dữ liệu.\n")
+
+#         full_content = "\n\n".join(content_list)  # Ghép nội dung từ nhiều trang lại
+
+#         return {"answer": full_content, "references": references}
+
+# search_price_tool = CustomGoogleSearchAPIWrapperContent()
+
+class CustomGoogleSearchAPIWrapperPrice(GoogleSearchAPIWrapper):
+    use_selenium: bool = Field(default=False, exclude=True)  # Khai báo thuộc tính use_selenium
+
+    def __init__(self, use_selenium=False, google_api_key=None, google_cse_id=None, **kwargs):
+        """Khởi tạo với API Key và CSE ID có thể truyền từ tham số hoặc lấy từ mặc định."""
+        google_api_key = google_api_key or "AIzaSyCxKATX40xEOqEZCAtusTIdlXk7Z9C74KE"
+        google_cse_id = google_cse_id or "033cd3a8777fa4c8d"
+        
+        # Thêm API vào kwargs nếu chưa có
+        kwargs.setdefault("google_api_key", google_api_key)
+        kwargs.setdefault("google_cse_id", google_cse_id)
+
+        super().__init__(**kwargs)  # Gọi constructor của lớp cha với kwargs
+        object.__setattr__(self, "use_selenium", use_selenium)  # Đặt giá trị cho use_selenium
+
+    def extract_price_from_html(self, html):
+        """Trích xuất giá từ nội dung HTML bằng BeautifulSoup + regex."""
+        soup = BeautifulSoup(html, "html.parser")
+        price_candidates = []
+
+        # Regex tìm giá tiền (VNĐ, USD, $)
+        price_regex = re.compile(r"(\d{1,3}(?:[.,]\d{3})*(?:\s*(?:đ|VNĐ|\$|USD)))", re.IGNORECASE)
+
+        # Tìm tất cả phần tử có thể chứa giá tiền
+        for tag in soup.find_all(["span", "div", "p", "td"]):
+            text = tag.get_text(strip=True)
+            matches = price_regex.findall(text)
+            if matches:
+                price_candidates.extend(matches)
+
+        return list(set(price_candidates))[:5]  #  Trả về tối đa 5 giá trị (loại bỏ trùng lặp)
+
+    def get_page_content(self, url):
+        """Truy cập trang web và lấy nội dung (dùng requests hoặc Selenium nếu cần)."""
+        print(f"🔍 Đang lấy nội dung từ: {url}")  # ✅ Debug log
+
+        if self.use_selenium:
+            try:
+                options = Options()
+                options.add_argument("--headless")  # Chạy không hiển thị trình duyệt
+                options.add_argument("--disable-blink-features=AutomationControlled")  # Giả lập trình duyệt người dùng
+                options.add_argument("--no-sandbox")
+                options.add_argument("--disable-dev-shm-usage")
+                driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+                
+                driver.get(url)
+                time.sleep(5)  # Đợi trang tải xong hoàn toàn
+
+                html = driver.page_source
+                driver.quit()
+                return html
+            except Exception as e:
+                print(f"Lỗi Selenium: {e}")
+                return None
+        else:
+            try:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept-Language": "en-US,en;q=0.9"
+                }
+                response = requests.get(url, headers=headers, timeout=10)
+                response.raise_for_status()  # Kiểm tra lỗi HTTP
+                return response.text
+            except requests.exceptions.RequestException as e:
+                print(f"Lỗi Requests: {e}")
+                return None
+
+    def run(self, query):
+        print(f"🔎 Đang tìm kiếm: {query}") 
+
+        search_results = self.results(query, num_results=5)  # Lấy 5 kết quả đầu tiên
+        if not search_results:
+            print("Không tìm thấy kết quả nào!")
+            return {"content": "Không tìm thấy kết quả phù hợp.", "references": []}
+
+        content = ""
+        references = []
+
+        for result in search_results:
+            url = result["link"]
+            references.append(url)
+
+            html = self.get_page_content(url)
+            if html:
+                extracted_prices = self.extract_price_from_html(html)
+                if extracted_prices:
+                    content += f"{result['title']}: {', '.join(extracted_prices)}\n"
+                else:
+                    content += f"{result['title']}: Không tìm thấy giá trực tiếp.\n"
+            else:
+                content += f"{result['title']}: Không thể lấy dữ liệu.\n"
+
+        return {"answer": content, "references": references}
+
+search_price_tool = CustomGoogleSearchAPIWrapperPrice(use_selenium=True)
+
+def price_search_function(chatbot, query):
+    query += " mới nhất"
+    # Nên có cái viết lại câu cho những câu tìm đường dẫn
+    document = search_price_tool.run(query)
+    document_str = json.dumps(document, ensure_ascii=False, indent=2)  
+    llm_chain = price_prompt_template | chatbot.llm_gemini | StrOutputParser()
+    print(document_str)
+    response = llm_chain.invoke({"input": query, "documents": document_str})
+    return response
+
+
+### ==================== WeatherAPIWrapper ==================== ###
+class WeatherAPIWrapper:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.base_url = "http://api.openweathermap.org/data/2.5/weather"
+
+    def get_weather(self, location):
+        params = {
+            "q": location,
+            "appid": self.api_key,
+            "units": "metric",  # Đơn vị độ C
+            "lang": "vi"  # Ngôn ngữ tiếng Việt
+        }
+
+        try:
+            response = requests.get(self.base_url, params=params)
+            data = response.json()
+
+            if response.status_code == 200:
+                weather_desc = data["weather"][0]["description"].capitalize()
+                temp = data["main"]["temp"]
+                humidity = data["main"]["humidity"]
+                wind_speed = data["wind"]["speed"]
+
+                return (
+                    f"Thời tiết tại {location}: {weather_desc}.\n"
+                    f"Nhiệt độ: {temp}°C, Độ ẩm: {humidity}%, Gió: {wind_speed} m/s."
+                )
+            else:
+                return f"Không tìm thấy thông tin thời tiết cho {location}."
+        except Exception as e:
+            return f"Lỗi khi gọi API thời tiết: {str(e)}"
+
+# Thay API_KEY bằng khóa API thực của bạn
+API_KEY = "b13f85eb589c453522bb1322a6763a8d"
+weather_api = WeatherAPIWrapper(API_KEY)
+
+"""
+    cau hoi: "Thời tiết tại Hà Nội bây giờ thế nào?"
+    -> get_location -> "Hà Nội" -> get_weather("Hà Nội")
+    
+    
+"""
+
+
+
+
+
+
+
+
+
+
+
+
+
