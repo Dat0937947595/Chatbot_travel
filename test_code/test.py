@@ -1,57 +1,55 @@
 import os
 import sys
-# Thêm thư mục gốc vào sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import json
-import requests
+from functools import partial
+from dotenv import load_dotenv
 import logging
+
+# Thêm thư mục gốc (CHATBOT_TRAVEL) vào sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+import requests
+import json
 from datetime import datetime, timedelta
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
-from src.chatbot import Chatbot
-
+import logging
 
 logger = logging.getLogger("Services")
 
 def weather_info_function(chatbot, query):
-    """Hàm tra cứu và sinh phản hồi thời tiết chi tiết cho các tỉnh/thành phố ở Việt Nam."""
+    """Hàm tra cứu và sinh phản hồi thời tiết chi tiết cho chatbot du lịch."""
     API_KEY = 'b13f85eb589c453522bb1322a6763a8d'
-    if not API_KEY:
-        logger.error("OPENWEATHER_API_KEY không được tìm thấy.")
-        return "<Ask> Hệ thống chưa được cấu hình để tra cứu thời tiết. Vui lòng thử lại sau."
-
     BASE_URL = "http://api.openweathermap.org/data/2.5/forecast"
 
-    # Prompt để trích xuất tên thành phố và thời gian
+    # Prompt trích xuất thông tin từ query
     extract_info_prompt = PromptTemplate(
         input_variables=["query"],
         template="""
-        Bạn là một trợ lý du lịch thông minh. Nhiệm vụ:
+        Bạn là một trợ lý du lịch thông minh, chuyên nghiệp. Nhiệm vụ:
         1. Trích xuất tên tỉnh/thành phố từ câu hỏi.
-        2. Trích xuất thời gian và chuyển đổi sang số (VD:
-            {{
-                "hôm nay": 0,
-                "ngày mai": 1,
-                "ngày kia": 2,
-                "tuần sau": 7
-            }}
-        ). Nếu không có, mặc định là "hôm nay" -> 0.
+        2. Kiểm tra tên tỉnh/thành phố có hợp lệ không. Nếu không sử dụng kiến thức của bạn về tỉnh thành phố việt nam để viết lại tên tỉnh/thành phố.
+        3. Tên tỉnh/thành phố được trích xuất được viết dưới dạng viết thường không dấu.
+        2. Trích xuất số ngày dự báo yêu cầu (VD: "hôm nay" -> 1, "ngày mai" -> 2, "10 ngày tới" -> 10). Nếu không rõ, mặc định là 1.
 
-        **Câu hỏi**: "{query}"
+        **Câu hỏi người dùng**: "{query}"
 
         **Định dạng đầu ra (JSON)**:
-        - Nếu tìm thấy: {{"city": "<tên thành phố>", "time": <thời gian>}}
-        - Nếu không rõ: {{"ask": "<câu hỏi làm rõ>"}}
+        - {{"city": "<tên thành phố>", "days": <số ngày>}}
         """
     )
 
-    # Chain để trích xuất thông tin
+    # Chain trích xuất
     extract_chain = extract_info_prompt | chatbot.llm_gemini | JsonOutputParser()
-    extract_result = extract_chain.invoke({"query": query})
-    logger.info(f"Extracted result: {extract_result}")
+    try:
+        extract_result = extract_chain.invoke({"query": query})
+        logger.info(f"Extracted result: {extract_result}")
+    except Exception as e:
+        logger.error(f"Error extracting info: {str(e)}")
+        return "<Ask> Tôi không hiểu yêu cầu của bạn. Vui lòng thử lại."
 
-    city = extract_result['city']
-    days_ahead = extract_result['time']
+    city = extract_result.get("city")
+    days_requested = extract_result.get("days", 1)
+    days_to_fetch = min(days_requested, 5)  # Giới hạn API miễn phí
 
     # Gọi API OpenWeatherMap
     try:
@@ -66,64 +64,99 @@ def weather_info_function(chatbot, query):
 
         if data.get("cod") != "200":
             logger.warning(f"API error: {data.get('message')}")
-            return "<Ask> Không tìm thấy thông tin thời tiết cho thành phố này. Vui lòng kiểm tra lại tên."
+            return "<Ask> Không tìm thấy thông tin thời tiết cho thành phố này."
 
-        # Lọc dữ liệu cho ngày cụ thể
-        target_date = (datetime.now() + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
-        forecast_data = [item for item in data["list"] if datetime.fromtimestamp(item["dt"]).strftime("%Y-%m-%d") == target_date]
+        # Nhóm dữ liệu theo ngày
+        forecast_by_day = {}
+        for item in data["list"]:
+            date = datetime.fromtimestamp(item["dt"]).strftime("%Y-%m-%d")
+            if date not in forecast_by_day:
+                forecast_by_day[date] = {
+                    "temps": [],
+                    "descriptions": [],
+                    "wind_speeds": [],
+                    "humidities": [],
+                    "rain": 0
+                }
+            forecast_by_day[date]["temps"].append(item["main"]["temp"])
+            forecast_by_day[date]["descriptions"].append(item["weather"][0]["description"])
+            forecast_by_day[date]["wind_speeds"].append(item["wind"]["speed"])
+            forecast_by_day[date]["humidities"].append(item["main"]["humidity"])
+            # Tổng lượng mưa trong ngày (nếu có)
+            forecast_by_day[date]["rain"] = max(forecast_by_day[date]["rain"], item.get("rain", {}).get("3h", 0))
 
-        if not forecast_data:
-            return f"Không có dữ liệu thời tiết."
-
-        # Tính trung bình nhiệt độ và chọn mô tả chính
-        temps = [item["main"]["temp"] for item in forecast_data]
-        descriptions = [item["weather"][0]["description"] for item in forecast_data]
-        avg_temp = sum(temps) / len(temps)
-        main_description = max(set(descriptions), key=descriptions.count)
-
-        weather_summary = {
-            "date": target_date,
-            "avg_temp": round(avg_temp, 1),
-            "description": main_description
-        }
+        # Tạo dữ liệu thời tiết
+        weather_summary = []
+        for i, (date, info) in enumerate(forecast_by_day.items()):
+            if i >= days_to_fetch:
+                break
+            weather_summary.append({
+                "date": date,
+                "avg_temp": round(sum(info["temps"]) / len(info["temps"]), 1),
+                "description": max(set(info["descriptions"]), key=info["descriptions"].count),
+                "wind_speed": round(sum(info["wind_speeds"]) / len(info["wind_speeds"]), 1),
+                "humidity": round(sum(info["humidities"]) / len(info["humidities"])),
+                "rain": round(info["rain"], 1)
+            })
 
     except Exception as e:
         logger.error(f"Error fetching weather data: {str(e)}")
-        return f"<Ask> Lỗi khi tra cứu thời tiết: {str(e)}. Vui lòng thử lại."
+        return f"<Ask> Lỗi khi tra cứu thời tiết: {str(e)}. Bạn vui lòng đặt câu hỏi càng rõ ràng để tôi giúp bạn trả lời tốt hơn nhé."
 
-    # Prompt để sinh phản hồi chi tiết
+    # Prompt chuyên nghiệp để sinh phản hồi
     weather_response_prompt = PromptTemplate(
-        input_variables=["query", "weather_data"],
+        input_variables=["query", "weather_data", "days_requested"],
         template="""
-        Bạn là trợ lý du lịch chuyên nghiệp. Dựa trên dữ liệu thời tiết và câu hỏi, hãy trả lời chi tiết, tự nhiên, hữu ích.
+        Bạn là một trợ lý du lịch chuyên nghiệp, thân thiện và am hiểu thời tiết. Dựa trên dữ liệu thời tiết từ API và câu hỏi của người dùng, hãy cung cấp phản hồi chi tiết, tự nhiên, hữu ích, phù hợp với mục đích du lịch.
 
-        **Câu hỏi**: "{query}"
+        **Câu hỏi người dùng**: "{query}"
         **Dữ liệu thời tiết**: {weather_data}
+        **Số ngày yêu cầu**: {days_requested}
 
         **Hướng dẫn**:
-        - Trả lời thân thiện, phù hợp với du lịch.
-        - Tập trung vào ngày được yêu cầu.
-        - Cung cấp thông tin tổng quan nếu không có yêu cầu cụ thể.
+        - Liệt kê dự báo thời tiết từng ngày (tối đa 5 ngày): bao gồm nhiệt độ trung bình, mô tả thời tiết, tốc độ gió, độ ẩm, và lượng mưa (nếu có).
+        - Nếu số ngày yêu cầu > 5, giải thích nhẹ nhàng rằng dữ liệu chỉ có đến 5 ngày và gợi ý kiểm tra sau.
+        - Cung cấp gợi ý du lịch dựa trên thời tiết:
+          - Mưa > 0mm: Đề xuất mang ô, hoạt động trong nhà.
+          - Gió > 7 m/s: Cảnh báo gió mạnh, tránh hoạt động ngoài trời như đi biển.
+          - Độ ẩm > 80%: Lưu ý cảm giác oi bức.
+          - Nhiệt độ < 20°C hoặc > 35°C: Gợi ý trang phục phù hợp.
+        - Giữ giọng điệu thân thiện, ngắn gọn, như một người bạn đồng hành.
+
+        **Ví dụ**:
+        - Input: "Thời tiết ở Hà Nội trong 10 ngày tới thế nào?"
+          Weather Data: [
+            {{"date": "2025-03-20", "avg_temp": 22, "description": "mưa nhỏ", "wind_speed": 5, "humidity": 85, "rain": 2}},
+            {{"date": "2025-03-21", "avg_temp": 24, "description": "mây rải rác", "wind_speed": 3, "humidity": 70, "rain": 0}}
+          ]
+          Output: "Dự báo thời tiết ở Hà Nội trong 5 ngày tới (tôi chỉ có dữ liệu đến đó thôi, bạn có thể hỏi lại sau vài ngày nhé!):\n- 20/03: 22°C, mưa nhỏ, gió 5 m/s, độ ẩm 85%, mưa 2mm – Nhớ mang ô vì trời hơi ẩm ướt!\n- 21/03: 24°C, mây rải rác, gió 3 m/s, độ ẩm 70% – Thời tiết dễ chịu, rất hợp để dạo phố.\nThời tiết tổng thể khá mát mẻ, bạn tha hồ khám phá Hà Nội!"
         """
     )
 
-    # Chain để sinh phản hồi
+    # Chain sinh phản hồi
     response_chain = weather_response_prompt | chatbot.llm_gemini | StrOutputParser()
-
     try:
         response = response_chain.invoke({
             "query": query,
-            "weather_data": json.dumps(weather_summary, ensure_ascii=False)
+            "weather_data": json.dumps(weather_summary, ensure_ascii=False),
+            "days_requested": days_requested
         })
         logger.info(f"Generated response: {response}")
         return response
     except Exception as e:
         logger.error(f"Error generating response: {str(e)}")
-        return f"Thời tiết tại {city} vào {days_ahead}: {weather_summary['description']}, nhiệt độ trung bình {weather_summary['avg_temp']}°C."
+        # Phản hồi dự phòng
+        response = f"Dự báo thời tiết ở {city}:\n"
+        for day in weather_summary:
+            rain_info = f", mưa {day['rain']}mm" if day['rain'] > 0 else ""
+            response += f"- {day['date']}: {day['avg_temp']}°C, {day['description']}, gió {day['wind_speed']} m/s, độ ẩm {day['humidity']}%{rain_info}.\n"
+        if days_requested > 5:
+            response += "Tôi chỉ có dữ liệu 5 ngày thôi, bạn quay lại hỏi thêm sau nhé!"
+        return response
 
-# Test hàm
+# Test
 if __name__ == "__main__":
+    from src.chatbot import Chatbot
     chatbot = Chatbot()
-    query = "Thời tiết ở thành phố hồ chí minh ngày mai thế nào?"
-    response = weather_info_function(chatbot, query)
-    print(response)
+    query = "Thời tiết ở Hà Nội trong 10 ngày tới thế nào?"
+    print(weather_info_function(chatbot, query))

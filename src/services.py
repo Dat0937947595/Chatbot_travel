@@ -1,15 +1,20 @@
 from .utils import *
 import logging
 import requests
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain.schema.runnable import RunnableLambda
 from langchain.prompts import PromptTemplate
+from datetime import datetime
+import json
 
 # import prompt templates
 from prompts.query_history_prompt_template import query_history_prompt_template
 from prompts.location_info_prompt_template import location_info_prompt
 from prompts.itinerary_planner_prompt_template import itinerary_planner_prompt
+from prompts.weather_info_prompt_template import extract_info_prompt, weather_response_prompt
 
+
+# Logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Services")
 
@@ -119,16 +124,95 @@ def not_relevant_function(chatbot, user_input):
     return response
 
 def weather_info_function(chatbot, query):
-    # try:
-    #     api_key = os.getenv("OPENWEATHER_API_KEY")
-    #     location = extract_location(query)
-    #     url = f"http://api.openweathermap.org/data/2.5/weather?q={location}&appid={api_key}&units=metric"
-    #     response = requests.get(url).json()
-    #     return f"Thời tiết tại {location}: {response['main']['temp']}°C, {response['weather'][0]['description']}."
-    # except Exception as e:
-    #     return f"Không thể lấy thông tin thời tiết: {str(e)}"
-    
-    return "Thời tiết tại Đà Nẵng: 30°C, nắng nhẹ."
+    """Hàm tra cứu và sinh phản hồi thời tiết chi tiết cho chatbot du lịch."""
+    API_KEY = 'b13f85eb589c453522bb1322a6763a8d'
+    BASE_URL = "http://api.openweathermap.org/data/2.5/forecast"
+
+    # Chain trích xuất
+    extract_chain = extract_info_prompt | chatbot.llm_gemini | JsonOutputParser()
+    try:
+        extract_result = extract_chain.invoke({"query": query})
+        logger.info(f"Extracted result: {extract_result}")
+    except Exception as e:
+        logger.error(f"Error extracting info: {str(e)}")
+        return "<Ask> Tôi không hiểu yêu cầu của bạn. Vui lòng thử lại."
+
+    city = extract_result.get("city")
+    days_requested = extract_result.get("days", 1)
+    days_to_fetch = min(days_requested, 5)  # Giới hạn API miễn phí
+
+    # Gọi API OpenWeatherMap
+    try:
+        params = {
+            "q": f"{city},VN",
+            "appid": API_KEY,
+            "units": "metric",
+            "lang": "vi",
+        }
+        response = requests.get(BASE_URL, params=params)
+        data = response.json()
+
+        if data.get("cod") != "200":
+            logger.warning(f"API error: {data.get('message')}")
+            return "<Ask> Không tìm thấy thông tin thời tiết cho thành phố này."
+
+        # Nhóm dữ liệu theo ngày
+        forecast_by_day = {}
+        for item in data["list"]:
+            date = datetime.fromtimestamp(item["dt"]).strftime("%Y-%m-%d")
+            if date not in forecast_by_day:
+                forecast_by_day[date] = {
+                    "temps": [],
+                    "descriptions": [],
+                    "wind_speeds": [],
+                    "humidities": [],
+                    "rain": 0
+                }
+            forecast_by_day[date]["temps"].append(item["main"]["temp"])
+            forecast_by_day[date]["descriptions"].append(item["weather"][0]["description"])
+            forecast_by_day[date]["wind_speeds"].append(item["wind"]["speed"])
+            forecast_by_day[date]["humidities"].append(item["main"]["humidity"])
+            # Tổng lượng mưa trong ngày (nếu có)
+            forecast_by_day[date]["rain"] = max(forecast_by_day[date]["rain"], item.get("rain", {}).get("3h", 0))
+
+        # Tạo dữ liệu thời tiết
+        weather_summary = []
+        for i, (date, info) in enumerate(forecast_by_day.items()):
+            if i >= days_to_fetch:
+                break
+            weather_summary.append({
+                "date": date,
+                "avg_temp": round(sum(info["temps"]) / len(info["temps"]), 1),
+                "description": max(set(info["descriptions"]), key=info["descriptions"].count),
+                "wind_speed": round(sum(info["wind_speeds"]) / len(info["wind_speeds"]), 1),
+                "humidity": round(sum(info["humidities"]) / len(info["humidities"])),
+                "rain": round(info["rain"], 1)
+            })
+
+    except Exception as e:
+        logger.error(f"Error fetching weather data: {str(e)}")
+        return f"<Ask> Lỗi khi tra cứu thời tiết: {str(e)}. Bạn vui lòng đặt câu hỏi càng rõ ràng để tôi giúp bạn trả lời tốt hơn nhé."
+
+    # Chain sinh phản hồi
+    response_chain = weather_response_prompt | chatbot.llm_gemini | StrOutputParser()
+    try:
+        response = response_chain.invoke({
+            "query": query,
+            "weather_data": json.dumps(weather_summary, ensure_ascii=False),
+            "days_requested": days_requested
+        })
+        logger.info(f"Generated response: {response}")
+        return response
+    except Exception as e:
+        logger.error(f"Error generating response: {str(e)}")
+        # Phản hồi dự phòng
+        response = f"Dự báo thời tiết ở {city}:\n"
+        for day in weather_summary:
+            rain_info = f", mưa {day['rain']}mm" if day['rain'] > 0 else ""
+            response += f"- {day['date']}: {day['avg_temp']}°C, {day['description']}, gió {day['wind_speed']} m/s, độ ẩm {day['humidity']}%{rain_info}.\n"
+        if days_requested > 5:
+            response += "Tôi chỉ có dữ liệu 5 ngày thôi, bạn quay lại hỏi thêm sau nhé!"
+        return response
 
 def price_search_function(chatbot, query):
     # try:

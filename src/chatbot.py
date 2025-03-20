@@ -108,7 +108,7 @@ class Chatbot:
             Tool(
                 name="WeatherAgent", 
                 func=partial(weather_info_function, self),
-                description="Thời tiết."
+                description="Thông tin liên quan tới thời tiết."
                 ),
             
             # Thiết lập tool cho việc lập kế hoạch
