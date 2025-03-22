@@ -69,54 +69,23 @@ class Chatbot:
             agent=self.agent,
             tools=self.tools,
             memory=self.memory,
-            verbose=verbose,  # Tùy chọn bật/tắt log chi tiết
+            verbose=verbose,  #  Tùy chọn bật/tắt log chi tiết
             handle_parsing_errors=True  # Tự động xử lý lỗi parsing
         )
 
     def _initialize_tools(self):
         return [
-            Tool(
-                name="GreetingsAgent", 
-                func=partial(greetings_function, self), 
-                description="Xử lý chào hỏi, giao tiếp."
-                ),
+            Tool(name="ContextEnhancerAgent", func=partial(context_enhancer_function, self), description="Tinh chỉnh truy vấn hoặc hỏi lại nếu thiếu ngữ cảnh."),
             
-            Tool(
-                name="NotrelevantTravelAgent", 
-                func=partial(not_relevant_function, self), 
-                description="Xử lý câu hỏi không liên quan du lịch."
-                ),
+            Tool(name="NotRelevantAgent", func=partial(not_relevant_function, self), description="Xử lý câu hỏi không liên quan hoặc chào hỏi."),
             
-            Tool(
-                name="MemoryAgent", 
-                func=partial(query_history, self), 
-                description="Kiểm tra lịch sử và viết lại câu hỏi."
-                ),
+            Tool(name="LocationAgent", func=partial(location_info_function, self), description="Thông tin địa điểm từ cơ sở dữ liệu."),
             
-            Tool(
-                name="LocationAgent", 
-                func=partial(location_info_function, self), 
-                description="Thông tin chung về địa điểm, khu vui chơi, món ăn nổi tiếng, ..."
-                ),
+            Tool(name="WeatherAgent", func=partial(weather_info_function, self), description="Thông tin liên quan đến thời tiết."),
             
-            Tool(
-                name="PriceSearchAgent", 
-                func=partial(price_search_function, self), 
-                description="Thông tin giá vé khu vui chơi, khách sạn, ..."
-                ),
+            Tool(name="WebSearch", func=partial(price_search_function, self), description="Tìm kiếm thông tin trên internet ví dụ thời tiết, giá vé, v.v."),
             
-            Tool(
-                name="WeatherAgent", 
-                func=partial(weather_info_function, self),
-                description="Thông tin liên quan tới thời tiết."
-                ),
-            
-            # Thiết lập tool cho việc lập kế hoạch
-            Tool(
-                name="PlanAgent", 
-                func=partial(itinerary_planner_function, self), 
-                description="Lập kế hoạch."
-                ),
+            Tool(name="PlanAgent", func=partial(itinerary_planner_function, self), description="Lập kế hoạch chuyến đi từ cơ sở dữ liệu.")
         ]
 
     def _initialize_agent(self, verbose=False):
@@ -141,7 +110,7 @@ class Chatbot:
             response = self.executor.invoke({"input": user_input})
             output_text = response.get("output", "Không có phản hồi từ agent.")
 
-            logger.info(f"Generated response: {output_text}")
+            # logger.info(f"Generated response: {output_text}")
             return output_text
 
         except Exception as e:

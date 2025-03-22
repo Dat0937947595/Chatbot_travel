@@ -18,18 +18,9 @@ from prompts.weather_info_prompt_template import extract_info_prompt, weather_re
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Services")
 
-def query_history(chatbot, query):
-    chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
-    query_history_chain = (
-        query_history_prompt_template
-        | chatbot.llm_gemini
-        | StrOutputParser()
-    )
-    return query_history_chain.invoke({"history": chat_history, "query": query})
-
+"""Sinh phản hồi dựa trên truy vấn và ngữ cảnh, sử dụng danh sách câu hỏi từ query_generation_chain."""
 def generate_response(chatbot, user_input, prompt_template_for_query):
-    """Sinh phản hồi dựa trên truy vấn và ngữ cảnh, sử dụng danh sách câu hỏi từ query_generation_chain."""
-    logger.info(f"\nSinh ra câu trả lời từ câu truy vấn: {user_input}\n")
+    # logger.info(f"\nSinh ra câu trả lời từ câu truy vấn: {user_input}\n")
     
     # Lấy danh sách câu hỏi từ query_generation_chain
     def get_questions(x):
@@ -51,6 +42,9 @@ def generate_response(chatbot, user_input, prompt_template_for_query):
         | RunnableLambda(lambda results: reciprocal_rank_fusion(results))  # Gộp kết quả
     )
     
+    document_retrieval_chain = retrieval_chain_rag_fusion.invoke({"question": user_input})
+    logger.info(f"\nGọi RAG Fusion chain với câu truy vấn: {user_input}\n {document_retrieval_chain}\n")
+    
     def format_input(inputs):
         context_result = retrieval_chain_rag_fusion.invoke(inputs)
         return {"retrieved_context": context_result, "question": inputs["question"]}
@@ -66,14 +60,32 @@ def generate_response(chatbot, user_input, prompt_template_for_query):
     
     return final_rag_chain.invoke({"question": user_input})
 
-def location_info_function(chatbot, query):
-    return generate_response(chatbot, query, location_info_prompt)
 
-def itinerary_planner_function(chatbot, query):
-    return generate_response(chatbot, query, itinerary_planner_prompt)
-
+"""Tinh chỉnh truy vấn, trả lời trực tiếp, hoặc hỏi lại nếu thiếu ngữ cảnh."""
+def context_enhancer_function(chatbot, query):
+    chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
+    query_history_chain = (
+        query_history_prompt_template
+        | chatbot.llm_gemini
+        | JsonOutputParser()
+    )
+    result = query_history_chain.invoke({"history": chat_history, "query": query})
+    
+    # Trường hợp trả lời trực tiếp
+    if "response" in result:
+        return result["response"]
+    # Trường hợp tinh chỉnh truy vấn
+    elif "refined_query" in result:
+        return result["refined_query"]
+    # Trường hợp hỏi lại
+    else:
+        missing_info = result.get("missing_info", "Vui lòng cung cấp thêm thông tin (địa điểm, thời gian, v.v.).")
+        return f"<Ask> {missing_info}"
+    
+    
+""" --------------------------------- """
+"""Sinh phản hồi tự nhiên cho các câu chào hỏi hoặc giao tiếp xã giao bằng LLM Gemini."""
 def greetings_function(chatbot, user_input):
-    """Sinh phản hồi tự nhiên cho các câu chào hỏi hoặc giao tiếp xã giao bằng LLM Gemini."""
     # Tạo prompt dưới dạng PromptTemplate
     greeting_prompt_template = PromptTemplate(
         input_variables=["chat_history", "question"],
@@ -99,32 +111,39 @@ def greetings_function(chatbot, user_input):
     response = greeting_chain.invoke({"chat_history": chat_history, "question": user_input})
     return response
 
-def not_relevant_function(chatbot, user_input):
-    """Phản hồi khi câu hỏi không liên quan đến du lịch."""
-    # Tạo prompt dưới dạng PromptTemplate
+
+""" --------------------------------- """
+"""Xử lý câu hỏi không liên quan hoặc chào hỏi."""
+def not_relevant_function(chatbot, query):
     not_relevant_prompt_template = PromptTemplate(
-        input_variables=["question"],
+        input_variables=["chat_history", "query"],
         template="""
-        Bạn là một trợ lý du lịch thông minh, chỉ hỗ trợ các câu hỏi về du lịch hoặc giao tiếp xã giao.
-        Câu hỏi của người dùng: {question}
-        Hãy từ chối nhẹ nhàng nếu câu hỏi không liên quan đến du lịch, và gợi ý họ hỏi về du lịch.
-        Trả về phản hồi ngắn gọn.
+        Bạn là một trợ lý du lịch thân thiện. Nếu câu hỏi không liên quan đến du lịch, từ chối nhẹ nhàng và gợi ý hỏi về du lịch. Nếu là chào hỏi, trả lời tự nhiên.
+        Lịch sử trò chuyện: {chat_history}
+        Câu hỏi: {query}
+        Trả về phản hồi ngắn gọn, thân thiện.
         """
     )
-    
-    # Tạo chain: PromptTemplate -> LLM Gemini -> string output
-    not_relevant_chain = (
-        not_relevant_prompt_template
-        | chatbot.llm_gemini
-        | StrOutputParser()
-    )
-    
-    # Gọi chain với input là dict chứa question
-    response = not_relevant_chain.invoke({"question": user_input})
-    return response
+    chain = not_relevant_prompt_template | chatbot.llm_gemini | StrOutputParser()
+    chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
+    return chain.invoke({"chat_history": chat_history, "query": query})
 
+
+""" --------------------------------- """
+"""Xử lý các câu hỏi liên quan đến địa điểm, thông tin địa điểm."""
+def location_info_function(chatbot, query):
+    return generate_response(chatbot, query, location_info_prompt)
+
+
+""" --------------------------------- """
+"""Xử lý các câu hỏi liên quan đến lập kế hoạch du lịch."""
+def itinerary_planner_function(chatbot, query):
+    return generate_response(chatbot, query, itinerary_planner_prompt)
+
+
+""" --------------------------------- """
+"""Hàm tra cứu và sinh phản hồi thời tiết chi tiết cho chatbot du lịch."""
 def weather_info_function(chatbot, query):
-    """Hàm tra cứu và sinh phản hồi thời tiết chi tiết cho chatbot du lịch."""
     API_KEY = 'b13f85eb589c453522bb1322a6763a8d'
     BASE_URL = "http://api.openweathermap.org/data/2.5/forecast"
 
@@ -140,6 +159,11 @@ def weather_info_function(chatbot, query):
     city = extract_result.get("city")
     days_requested = extract_result.get("days", 1)
     days_to_fetch = min(days_requested, 5)  # Giới hạn API miễn phí
+
+    # Xác định ngày hiện tại (hôm nay)
+    # Trong thực tế, sử dụng: current_date = datetime.now()
+    current_date = datetime.now()
+    current_date_str = current_date.strftime("%Y-%m-%d")
 
     # Gọi API OpenWeatherMap
     try:
@@ -166,14 +190,14 @@ def weather_info_function(chatbot, query):
                     "descriptions": [],
                     "wind_speeds": [],
                     "humidities": [],
-                    "rain": 0
+                    "rain": 0  # Khởi tạo lượng mưa bằng 0
                 }
             forecast_by_day[date]["temps"].append(item["main"]["temp"])
             forecast_by_day[date]["descriptions"].append(item["weather"][0]["description"])
             forecast_by_day[date]["wind_speeds"].append(item["wind"]["speed"])
             forecast_by_day[date]["humidities"].append(item["main"]["humidity"])
-            # Tổng lượng mưa trong ngày (nếu có)
-            forecast_by_day[date]["rain"] = max(forecast_by_day[date]["rain"], item.get("rain", {}).get("3h", 0))
+            # Cộng dồn lượng mưa trong ngày
+            forecast_by_day[date]["rain"] += item.get("rain", {}).get("3h", 0)  # Sửa từ max thành +=
 
         # Tạo dữ liệu thời tiết
         weather_summary = []
@@ -186,7 +210,7 @@ def weather_info_function(chatbot, query):
                 "description": max(set(info["descriptions"]), key=info["descriptions"].count),
                 "wind_speed": round(sum(info["wind_speeds"]) / len(info["wind_speeds"]), 1),
                 "humidity": round(sum(info["humidities"]) / len(info["humidities"])),
-                "rain": round(info["rain"], 1)
+                "rain": round(info["rain"], 1)  # Lượng mưa đã được cộng dồn
             })
 
     except Exception as e:
@@ -199,7 +223,8 @@ def weather_info_function(chatbot, query):
         response = response_chain.invoke({
             "query": query,
             "weather_data": json.dumps(weather_summary, ensure_ascii=False),
-            "days_requested": days_requested
+            "days_requested": days_requested,
+            "current_date": current_date_str  # Truyền ngày hiện tại vào prompt
         })
         logger.info(f"Generated response: {response}")
         return response
@@ -208,8 +233,19 @@ def weather_info_function(chatbot, query):
         # Phản hồi dự phòng
         response = f"Dự báo thời tiết ở {city}:\n"
         for day in weather_summary:
+            # Ánh xạ ngày trong phản hồi dự phòng
+            day_date = datetime.strptime(day['date'], "%Y-%m-%d")
+            delta = (day_date - current_date).days
+            if delta == 0:
+                day_label = "Hôm nay"
+            elif delta == 1:
+                day_label = "Ngày mai"
+            elif delta == 2:
+                day_label = "Ngày kia"
+            else:
+                day_label = f"ngày {day_date.strftime('%d/%m')}"
             rain_info = f", mưa {day['rain']}mm" if day['rain'] > 0 else ""
-            response += f"- {day['date']}: {day['avg_temp']}°C, {day['description']}, gió {day['wind_speed']} m/s, độ ẩm {day['humidity']}%{rain_info}.\n"
+            response += f"- {day_label}: {day['avg_temp']}°C, {day['description']}, gió {day['wind_speed']} m/s, độ ẩm {day['humidity']}%{rain_info}.\n"
         if days_requested > 5:
             response += "Tôi chỉ có dữ liệu 5 ngày thôi, bạn quay lại hỏi thêm sau nhé!"
         return response
