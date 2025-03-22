@@ -1,18 +1,30 @@
 from .utils import *
+import os
+import sys
 import logging
 import requests
+from datetime import datetime
+import json
+import time
+
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain.schema.runnable import RunnableLambda
 from langchain.prompts import PromptTemplate
-from datetime import datetime
-import json
+from langchain_community.utilities import GoogleSearchAPIWrapper
+from langchain_community.document_loaders import WebBaseLoader
+from pydantic import Field
+
 
 # import prompt templates
 from prompts.query_history_prompt_template import query_history_prompt_template
 from prompts.location_info_prompt_template import location_info_prompt
 from prompts.itinerary_planner_prompt_template import itinerary_planner_prompt
 from prompts.weather_info_prompt_template import extract_info_prompt, weather_response_prompt
+from prompts.price_search_prompt_template import travel_info_prompt_template
 
+
+from dotenv import load_dotenv
+load_dotenv()
 
 # Logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -144,7 +156,7 @@ def itinerary_planner_function(chatbot, query):
 """ --------------------------------- """
 """Hàm tra cứu và sinh phản hồi thời tiết chi tiết cho chatbot du lịch."""
 def weather_info_function(chatbot, query):
-    API_KEY = 'b13f85eb589c453522bb1322a6763a8d'
+    # API_KEY = 'b13f85eb589c453522bb1322a6763a8d'
     BASE_URL = "http://api.openweathermap.org/data/2.5/forecast"
 
     # Chain trích xuất
@@ -250,28 +262,88 @@ def weather_info_function(chatbot, query):
             response += "Tôi chỉ có dữ liệu 5 ngày thôi, bạn quay lại hỏi thêm sau nhé!"
         return response
 
+
+""" --------------------------------- """
+"""Tìm kiếm thông tin giá vé, dịch vụ du lịch trên internet."""
+class CustomGoogleSearchAPIWrapperContent(GoogleSearchAPIWrapper):
+    def __init__(self, google_api_key=None, google_cse_id=None, **kwargs):
+        """
+            Bỏ key trong file .env
+        """
+        google_api_key = google_api_key or os.getenv("GOOGLE_API_KEY")
+        google_cse_id = google_cse_id or os.getenv("GOOGLE_CSE_ID")
+
+        kwargs.setdefault("google_api_key", google_api_key)
+        kwargs.setdefault("google_cse_id", google_cse_id)
+
+        super().__init__(**kwargs)
+
+    def get_page_content(self, url):
+        """Trích xuất nội dung chính từ trang web. Nếu fail, trả về None."""
+        try:
+            loader = WebBaseLoader(
+                url,
+                requests_per_second = 1
+            )
+            docs = loader.load()
+            if not docs:
+                return None
+            content = docs[0].page_content
+            # Xử lý lỗi font/encoding nếu cần
+            try:
+                content.encode("utf-8").decode("utf-8")
+            except UnicodeDecodeError:
+                content = content.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+            return content[:3000]  # Giới hạn độ dài để tránh input quá tải
+        except Exception as e:
+            print(f"[ERROR] Không thể tải nội dung từ {url}: {e}")
+            return None
+
+    def run(self, query, num_results=3):
+        search_results = self.results(query, num_results=num_results)
+        if not search_results:
+            return {
+                "answer": "Không tìm thấy kết quả phù hợp.",
+                "references": [],
+            }
+
+        content_list = []
+        references = []
+
+        for result in search_results:
+            url = result.get("link")
+            if not url:
+                continue
+            references.append(url)
+
+            page_text = self.get_page_content(url)
+            if page_text:
+                content_list.append(f"{result['title']} ({url}):\n{page_text}\n")
+            else:
+                content_list.append(f"{result['title']} ({url}): Không thể lấy dữ liệu.\n")
+
+        full_content = "\n\n".join(content_list)
+
+        return {
+            "answer": full_content,
+            "references": references,
+        }
+
+# Hàm gọi chatbot với thông tin tìm kiếm
+search_tool = CustomGoogleSearchAPIWrapperContent()
+
 def price_search_function(chatbot, query):
-    # try:
-    #     api_key = os.getenv("AMADEUS_API_KEY")
-    #     origin, destination, date = extract_flight_info(query)
-    #     url = f"https://api.amadeus.com/v2/shopping/flight-offers?origin={origin}&destination={destination}&departureDate={date}&apiKey={api_key}"
-    #     response = requests.get(url).json()
-    #     price = response['data'][0]['price']['total']
-    #     return f"Giá vé từ {origin} đến {destination} ngày {date}: {price} VND"
-    # except Exception as e:
-    #     return f"Không thể tìm giá vé: {str(e)}"
-    return "Giá vé từ Hà Nội đến Đà Nẵng ngày 20/3/2025: 1.2 triệu VND."
+    query += " mới nhất"
+    document = search_tool.run(query)
 
+    document_str = json.dumps(document["answer"], ensure_ascii=False, indent=2)
+    references_str = "\n".join(document["references"])
 
+    chain = travel_info_prompt_template | chatbot.llm_gemini | StrOutputParser()
 
-
-
-
-
-
-
-
-
-
-
-
+    response = chain.invoke({
+        "input": query,
+        "documents": document_str,
+        "references": references_str
+    })
+    return response

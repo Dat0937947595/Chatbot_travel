@@ -83,9 +83,15 @@ class Chatbot:
             
             Tool(name="WeatherAgent", func=partial(weather_info_function, self), description="Thông tin liên quan đến thời tiết."),
             
-            Tool(name="WebSearch", func=partial(price_search_function, self), description="Tìm kiếm thông tin trên internet ví dụ thời tiết, giá vé, v.v."),
+            # Tool(name="WebSearch", func=partial(price_search_function, self), description="Tìm kiếm thông tin trên internet ví dụ thời tiết, giá vé, v.v."),
             
-            Tool(name="PlanAgent", func=partial(itinerary_planner_function, self), description="Lập kế hoạch chuyến đi từ cơ sở dữ liệu.")
+            Tool(name="PlanAgent", func=partial(itinerary_planner_function, self), description="Lập kế hoạch chuyến đi từ cơ sở dữ liệu."),
+        
+            Tool(
+                name="PriceSearchAgent", 
+                func=partial(price_search_function, self), 
+                description="Thông tin giá các dịch vụ du lịch và trang web của những dịch vụ du lịch"
+            ),
         ]
 
     def _initialize_agent(self, verbose=False):
