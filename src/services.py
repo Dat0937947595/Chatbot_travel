@@ -1,12 +1,15 @@
-from .utils import *
 import os
 import sys
+# Thêm thư mục gốc (CHATBOT_TRAVEL) vào sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import logging
 import requests
 from datetime import datetime
 import json
 import time
 
+# Import các thư viện từ LangChain và các thư viện khác
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain.schema.runnable import RunnableLambda
 from langchain.prompts import PromptTemplate
@@ -22,9 +25,14 @@ from prompts.itinerary_planner_prompt_template import itinerary_planner_prompt
 from prompts.weather_info_prompt_template import extract_info_prompt, weather_response_prompt
 from prompts.price_search_prompt_template import travel_info_prompt_template
 
+# import utils
+from src.utils import *
 
+# Load biến môi trường
 from dotenv import load_dotenv
 load_dotenv()
+
+# print(os.getenv("GOOGLE_API_KEY"))
 
 # Logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -156,7 +164,6 @@ def itinerary_planner_function(chatbot, query):
 """ --------------------------------- """
 """Hàm tra cứu và sinh phản hồi thời tiết chi tiết cho chatbot du lịch."""
 def weather_info_function(chatbot, query):
-    # API_KEY = 'b13f85eb589c453522bb1322a6763a8d'
     BASE_URL = "http://api.openweathermap.org/data/2.5/forecast"
 
     # Chain trích xuất
@@ -181,7 +188,7 @@ def weather_info_function(chatbot, query):
     try:
         params = {
             "q": f"{city},VN",
-            "appid": API_KEY,
+            "appid": os.getenv("OPENWEATHERMAP_API_KEY"),
             "units": "metric",
             "lang": "vi",
         }
