@@ -1,77 +1,42 @@
-"""
-    File này dùng để test code
-"""
-
 import os
 import sys
+from functools import partial
+from dotenv import load_dotenv
+import logging
 
 # Thêm thư mục gốc (CHATBOT_TRAVEL) vào sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Import bên ngoài (package, lib)
-import dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_chroma import Chroma
-from langchain.memory import ConversationBufferMemory
-from langchain.tools import Tool
-from langchain.agents import AgentExecutor, create_react_agent
-from langchain.chains import LLMChain
+import requests
+import json
+from datetime import datetime, timedelta
+from langchain.prompts import PromptTemplate
+from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
+import logging
 
-# Import nội bộ project
-from config.config import VECTORSTORE_DIR
-from src.services import *
-from src.model import Model
-# from prompts.query_generation_prompt_template import query_generation_prompt_template
-# from prompts.prompt_template import query_generation_prompt_template
-from langchain_core.output_parsers import JsonOutputParser
-
-from src.services import *
 from src.chatbot import Chatbot
 
-import json
-# from prompts.location_info_prompt_template import location_info_prompt
+from langchain_community.utilities import OpenWeatherMapAPIWrapper
 
-# chatbot = Chatbot(verbose=True)
+from dotenv import load_dotenv
 
-# # Lấy danh sách câu hỏi từ query_generation_chain
-# def get_questions(x):
-#     result = chatbot.query_generation_chain.invoke({"question": x})
-#     try:
-        
-#         logger.info(f"\nKết quả từ query_generation_chain: {result}\n")
-#         # Lấy danh sách câu hỏi từ key "questions"
-#         return result["questions"]
-#     except (KeyError, TypeError) as e:
-#         logger.error(f"Lỗi khi xử lý output từ query_generation_chain: {e}")
-#         return [x]  # Trả về câu hỏi gốc nếu có lỗi
+# Load biến môi trường
+load_dotenv()
 
-# cleaned_query_generation = RunnableLambda(get_questions)
 
-# retrieval_chain_rag_fusion = (
-#     cleaned_query_generation
-#     | chatbot.retriever.map()  # Áp dụng retriever cho từng câu hỏi trong danh sách
-#     | RunnableLambda(lambda results: reciprocal_rank_fusion(results))  # Gộp kết quả
+print(os.getenv("GOOGLE_API_KEY"))
+# llm = ChatGoogleGenerativeAI(
+#     model="gemini-2.0-flash", 
+#     google_api_key="AIzaSyA-MAlE62P8Gg2g664zwnYcRAtNykEg_tE"
 # )
 
-# def format_input(inputs):
-#     context_result = retrieval_chain_rag_fusion.invoke(inputs)
-#     return {"retrieved_context": context_result, "question": inputs["question"]}
+# from googlesearch import search
 
-# formatted_prompt = RunnableLambda(lambda x: location_info_prompt.format(**x))
+# def google_search(query, num_results=5):
+#     search_results = search(query, num_results=num_results)
+#     return search_results
 
-# final_rag_chain = (
-#     RunnableLambda(format_input)
-#     | formatted_prompt
-#     | chatbot.llm_gemini
-#     | StrOutputParser()
-# )
-
-# user_input = "Các địa điểm du lịch nổi tiếng ở Đà Nẵng?"
-# print(final_rag_chain.invoke({"question": user_input}))
-
-
-
-from prompts.main_prompt_template import main_prompt_template
-
-print(main_prompt_template)
+# # Ví dụ sử dụng
+# results = google_search("giá vé xe khách từ TP.HCM đi Đà Lạt")
+# for result in results:
+#     print(result)

@@ -1,30 +1,46 @@
-from .utils import *
+import os
+import sys
+# Thêm thư mục gốc (CHATBOT_TRAVEL) vào sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import logging
 import requests
-from langchain_core.output_parsers import StrOutputParser
+from datetime import datetime
+import json
+import time
+
+# Import các thư viện từ LangChain và các thư viện khác
+from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain.schema.runnable import RunnableLambda
 from langchain.prompts import PromptTemplate
+from langchain_community.utilities import GoogleSearchAPIWrapper
+from langchain_community.document_loaders import WebBaseLoader
+from pydantic import Field
+
 
 # import prompt templates
 from prompts.query_history_prompt_template import query_history_prompt_template
 from prompts.location_info_prompt_template import location_info_prompt
 from prompts.itinerary_planner_prompt_template import itinerary_planner_prompt
+from prompts.weather_info_prompt_template import extract_info_prompt, weather_response_prompt
+from prompts.price_search_prompt_template import travel_info_prompt_template
 
+# import utils
+from src.utils import *
+
+# Load biến môi trường
+from dotenv import load_dotenv
+load_dotenv()
+
+# print(os.getenv("GOOGLE_API_KEY"))
+
+# Logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Services")
 
-def query_history(chatbot, query):
-    chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
-    query_history_chain = (
-        query_history_prompt_template
-        | chatbot.llm_gemini
-        | StrOutputParser()
-    )
-    return query_history_chain.invoke({"history": chat_history, "query": query})
-
+"""Sinh phản hồi dựa trên truy vấn và ngữ cảnh, sử dụng danh sách câu hỏi từ query_generation_chain."""
 def generate_response(chatbot, user_input, prompt_template_for_query):
-    """Sinh phản hồi dựa trên truy vấn và ngữ cảnh, sử dụng danh sách câu hỏi từ query_generation_chain."""
-    logger.info(f"\nSinh ra câu trả lời từ câu truy vấn: {user_input}\n")
+    # logger.info(f"\nSinh ra câu trả lời từ câu truy vấn: {user_input}\n")
     
     # Lấy danh sách câu hỏi từ query_generation_chain
     def get_questions(x):
@@ -46,6 +62,9 @@ def generate_response(chatbot, user_input, prompt_template_for_query):
         | RunnableLambda(lambda results: reciprocal_rank_fusion(results))  # Gộp kết quả
     )
     
+    document_retrieval_chain = retrieval_chain_rag_fusion.invoke({"question": user_input})
+    logger.info(f"\nGọi RAG Fusion chain với câu truy vấn: {user_input}\n {document_retrieval_chain}\n")
+    
     def format_input(inputs):
         context_result = retrieval_chain_rag_fusion.invoke(inputs)
         return {"retrieved_context": context_result, "question": inputs["question"]}
@@ -61,14 +80,32 @@ def generate_response(chatbot, user_input, prompt_template_for_query):
     
     return final_rag_chain.invoke({"question": user_input})
 
-def location_info_function(chatbot, query):
-    return generate_response(chatbot, query, location_info_prompt)
 
-def itinerary_planner_function(chatbot, query):
-    return generate_response(chatbot, query, itinerary_planner_prompt)
-
+"""Tinh chỉnh truy vấn, trả lời trực tiếp, hoặc hỏi lại nếu thiếu ngữ cảnh."""
+def context_enhancer_function(chatbot, query):
+    chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
+    query_history_chain = (
+        query_history_prompt_template
+        | chatbot.llm_gemini
+        | JsonOutputParser()
+    )
+    result = query_history_chain.invoke({"history": chat_history, "query": query})
+    
+    # Trường hợp trả lời trực tiếp
+    if "response" in result:
+        return result["response"]
+    # Trường hợp tinh chỉnh truy vấn
+    elif "refined_query" in result:
+        return result["refined_query"]
+    # Trường hợp hỏi lại
+    else:
+        missing_info = result.get("missing_info", "Vui lòng cung cấp thêm thông tin (địa điểm, thời gian, v.v.).")
+        return f"<Ask> {missing_info}"
+    
+    
+""" --------------------------------- """
+"""Sinh phản hồi tự nhiên cho các câu chào hỏi hoặc giao tiếp xã giao bằng LLM Gemini."""
 def greetings_function(chatbot, user_input):
-    """Sinh phản hồi tự nhiên cho các câu chào hỏi hoặc giao tiếp xã giao bằng LLM Gemini."""
     # Tạo prompt dưới dạng PromptTemplate
     greeting_prompt_template = PromptTemplate(
         input_variables=["chat_history", "question"],
@@ -94,95 +131,226 @@ def greetings_function(chatbot, user_input):
     response = greeting_chain.invoke({"chat_history": chat_history, "question": user_input})
     return response
 
-def not_relevant_function(chatbot, user_input):
-    """Phản hồi khi câu hỏi không liên quan đến du lịch."""
-    # Tạo prompt dưới dạng PromptTemplate
+
+""" --------------------------------- """
+"""Xử lý câu hỏi không liên quan hoặc chào hỏi."""
+def not_relevant_function(chatbot, query):
     not_relevant_prompt_template = PromptTemplate(
-        input_variables=["question"],
+        input_variables=["chat_history", "query"],
         template="""
-        Bạn là một trợ lý du lịch thông minh, chỉ hỗ trợ các câu hỏi về du lịch hoặc giao tiếp xã giao.
-        Câu hỏi của người dùng: {question}
-        Hãy từ chối nhẹ nhàng nếu câu hỏi không liên quan đến du lịch, và gợi ý họ hỏi về du lịch.
-        Trả về phản hồi ngắn gọn.
+        Bạn là một trợ lý du lịch thân thiện. Nếu câu hỏi không liên quan đến du lịch, từ chối nhẹ nhàng và gợi ý hỏi về du lịch. Nếu là chào hỏi, trả lời tự nhiên.
+        Lịch sử trò chuyện: {chat_history}
+        Câu hỏi: {query}
+        Trả về phản hồi ngắn gọn, thân thiện.
         """
     )
-    
-    # Tạo chain: PromptTemplate -> LLM Gemini -> string output
-    not_relevant_chain = (
-        not_relevant_prompt_template
-        | chatbot.llm_gemini
-        | StrOutputParser()
-    )
-    
-    # Gọi chain với input là dict chứa question
-    response = not_relevant_chain.invoke({"question": user_input})
-    return response
+    chain = not_relevant_prompt_template | chatbot.llm_gemini | StrOutputParser()
+    chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
+    return chain.invoke({"chat_history": chat_history, "query": query})
 
+
+""" --------------------------------- """
+"""Xử lý các câu hỏi liên quan đến địa điểm, thông tin địa điểm."""
+def location_info_function(chatbot, query):
+    return generate_response(chatbot, query, location_info_prompt)
+
+
+""" --------------------------------- """
+"""Xử lý các câu hỏi liên quan đến lập kế hoạch du lịch."""
+def itinerary_planner_function(chatbot, query):
+    return generate_response(chatbot, query, itinerary_planner_prompt)
+
+
+""" --------------------------------- """
+"""Hàm tra cứu và sinh phản hồi thời tiết chi tiết cho chatbot du lịch."""
 def weather_info_function(chatbot, query):
-    # try:
-    #     api_key = os.getenv("OPENWEATHER_API_KEY")
-    #     location = extract_location(query)
-    #     url = f"http://api.openweathermap.org/data/2.5/weather?q={location}&appid={api_key}&units=metric"
-    #     response = requests.get(url).json()
-    #     return f"Thời tiết tại {location}: {response['main']['temp']}°C, {response['weather'][0]['description']}."
-    # except Exception as e:
-    #     return f"Không thể lấy thông tin thời tiết: {str(e)}"
-    
-    return "Thời tiết tại Đà Nẵng: 30°C, nắng nhẹ."
+    BASE_URL = "http://api.openweathermap.org/data/2.5/forecast"
 
-def price_search_function(chatbot, query):
-    # try:
-    #     api_key = os.getenv("AMADEUS_API_KEY")
-    #     origin, destination, date = extract_flight_info(query)
-    #     url = f"https://api.amadeus.com/v2/shopping/flight-offers?origin={origin}&destination={destination}&departureDate={date}&apiKey={api_key}"
-    #     response = requests.get(url).json()
-    #     price = response['data'][0]['price']['total']
-    #     return f"Giá vé từ {origin} đến {destination} ngày {date}: {price} VND"
-    # except Exception as e:
-    #     return f"Không thể tìm giá vé: {str(e)}"
-    return "Giá vé từ Hà Nội đến Đà Nẵng ngày 20/3/2025: 1.2 triệu VND."
+    # Chain trích xuất
+    extract_chain = extract_info_prompt | chatbot.llm_gemini | JsonOutputParser()
+    try:
+        extract_result = extract_chain.invoke({"query": query})
+        logger.info(f"Extracted result: {extract_result}")
+    except Exception as e:
+        logger.error(f"Error extracting info: {str(e)}")
+        return "<Ask> Tôi không hiểu yêu cầu của bạn. Vui lòng thử lại."
 
+    city = extract_result.get("city")
+    days_requested = extract_result.get("days", 1)
+    days_to_fetch = min(days_requested, 5)  # Giới hạn API miễn phí
 
-### ==================== WeatherAPIWrapper ==================== ###
-class WeatherAPIWrapper:
-    def __init__(self, api_key):
-        self.api_key = api_key
-        self.base_url = "http://api.openweathermap.org/data/2.5/weather"
+    # Xác định ngày hiện tại (hôm nay)
+    # Trong thực tế, sử dụng: current_date = datetime.now()
+    current_date = datetime.now()
+    current_date_str = current_date.strftime("%Y-%m-%d")
 
-    def get_weather(self, location):
+    # Gọi API OpenWeatherMap
+    try:
         params = {
-            "q": location,
-            "appid": self.api_key,
-            "units": "metric",  # Đơn vị độ C
-            "lang": "vi"  # Ngôn ngữ tiếng Việt
+            "q": f"{city},VN",
+            "appid": os.getenv("OPENWEATHERMAP_API_KEY"),
+            "units": "metric",
+            "lang": "vi",
+        }
+        response = requests.get(BASE_URL, params=params)
+        data = response.json()
+
+        if data.get("cod") != "200":
+            logger.warning(f"API error: {data.get('message')}")
+            return "<Ask> Không tìm thấy thông tin thời tiết cho thành phố này."
+
+        # Nhóm dữ liệu theo ngày
+        forecast_by_day = {}
+        for item in data["list"]:
+            date = datetime.fromtimestamp(item["dt"]).strftime("%Y-%m-%d")
+            if date not in forecast_by_day:
+                forecast_by_day[date] = {
+                    "temps": [],
+                    "descriptions": [],
+                    "wind_speeds": [],
+                    "humidities": [],
+                    "rain": 0  # Khởi tạo lượng mưa bằng 0
+                }
+            forecast_by_day[date]["temps"].append(item["main"]["temp"])
+            forecast_by_day[date]["descriptions"].append(item["weather"][0]["description"])
+            forecast_by_day[date]["wind_speeds"].append(item["wind"]["speed"])
+            forecast_by_day[date]["humidities"].append(item["main"]["humidity"])
+            # Cộng dồn lượng mưa trong ngày
+            forecast_by_day[date]["rain"] += item.get("rain", {}).get("3h", 0)  # Sửa từ max thành +=
+
+        # Tạo dữ liệu thời tiết
+        weather_summary = []
+        for i, (date, info) in enumerate(forecast_by_day.items()):
+            if i >= days_to_fetch:
+                break
+            weather_summary.append({
+                "date": date,
+                "avg_temp": round(sum(info["temps"]) / len(info["temps"]), 1),
+                "description": max(set(info["descriptions"]), key=info["descriptions"].count),
+                "wind_speed": round(sum(info["wind_speeds"]) / len(info["wind_speeds"]), 1),
+                "humidity": round(sum(info["humidities"]) / len(info["humidities"])),
+                "rain": round(info["rain"], 1)  # Lượng mưa đã được cộng dồn
+            })
+
+    except Exception as e:
+        logger.error(f"Error fetching weather data: {str(e)}")
+        return f"<Ask> Lỗi khi tra cứu thời tiết: {str(e)}. Bạn vui lòng đặt câu hỏi càng rõ ràng để tôi giúp bạn trả lời tốt hơn nhé."
+
+    # Chain sinh phản hồi
+    response_chain = weather_response_prompt | chatbot.llm_gemini | StrOutputParser()
+    try:
+        response = response_chain.invoke({
+            "query": query,
+            "weather_data": json.dumps(weather_summary, ensure_ascii=False),
+            "days_requested": days_requested,
+            "current_date": current_date_str  # Truyền ngày hiện tại vào prompt
+        })
+        logger.info(f"Generated response: {response}")
+        return response
+    except Exception as e:
+        logger.error(f"Error generating response: {str(e)}")
+        # Phản hồi dự phòng
+        response = f"Dự báo thời tiết ở {city}:\n"
+        for day in weather_summary:
+            # Ánh xạ ngày trong phản hồi dự phòng
+            day_date = datetime.strptime(day['date'], "%Y-%m-%d")
+            delta = (day_date - current_date).days
+            if delta == 0:
+                day_label = "Hôm nay"
+            elif delta == 1:
+                day_label = "Ngày mai"
+            elif delta == 2:
+                day_label = "Ngày kia"
+            else:
+                day_label = f"ngày {day_date.strftime('%d/%m')}"
+            rain_info = f", mưa {day['rain']}mm" if day['rain'] > 0 else ""
+            response += f"- {day_label}: {day['avg_temp']}°C, {day['description']}, gió {day['wind_speed']} m/s, độ ẩm {day['humidity']}%{rain_info}.\n"
+        if days_requested > 5:
+            response += "Tôi chỉ có dữ liệu 5 ngày thôi, bạn quay lại hỏi thêm sau nhé!"
+        return response
+
+
+""" --------------------------------- """
+"""Tìm kiếm thông tin giá vé, dịch vụ du lịch trên internet."""
+class CustomGoogleSearchAPIWrapperContent(GoogleSearchAPIWrapper):
+    def __init__(self, google_api_key=None, google_cse_id=None, **kwargs):
+        """
+            Bỏ key trong file .env
+        """
+        google_api_key = google_api_key or os.getenv("GOOGLE_API_KEY")
+        google_cse_id = google_cse_id or os.getenv("GOOGLE_CSE_ID")
+
+        kwargs.setdefault("google_api_key", google_api_key)
+        kwargs.setdefault("google_cse_id", google_cse_id)
+
+        super().__init__(**kwargs)
+
+    def get_page_content(self, url):
+        """Trích xuất nội dung chính từ trang web. Nếu fail, trả về None."""
+        try:
+            loader = WebBaseLoader(
+                url,
+                requests_per_second = 1
+            )
+            docs = loader.load()
+            if not docs:
+                return None
+            content = docs[0].page_content
+            # Xử lý lỗi font/encoding nếu cần
+            try:
+                content.encode("utf-8").decode("utf-8")
+            except UnicodeDecodeError:
+                content = content.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+            return content[:3000]  # Giới hạn độ dài để tránh input quá tải
+        except Exception as e:
+            print(f"[ERROR] Không thể tải nội dung từ {url}: {e}")
+            return None
+
+    def run(self, query, num_results=3):
+        search_results = self.results(query, num_results=num_results)
+        if not search_results:
+            return {
+                "answer": "Không tìm thấy kết quả phù hợp.",
+                "references": [],
+            }
+
+        content_list = []
+        references = []
+
+        for result in search_results:
+            url = result.get("link")
+            if not url:
+                continue
+            references.append(url)
+
+            page_text = self.get_page_content(url)
+            if page_text:
+                content_list.append(f"{result['title']} ({url}):\n{page_text}\n")
+            else:
+                content_list.append(f"{result['title']} ({url}): Không thể lấy dữ liệu.\n")
+
+        full_content = "\n\n".join(content_list)
+
+        return {
+            "answer": full_content,
+            "references": references,
         }
 
-        try:
-            response = requests.get(self.base_url, params=params)
-            data = response.json()
+# Hàm gọi chatbot với thông tin tìm kiếm
+search_tool = CustomGoogleSearchAPIWrapperContent()
 
-            if response.status_code == 200:
-                weather_desc = data["weather"][0]["description"].capitalize()
-                temp = data["main"]["temp"]
-                humidity = data["main"]["humidity"]
-                wind_speed = data["wind"]["speed"]
+def price_search_function(chatbot, query):
+    query += " mới nhất"
+    document = search_tool.run(query)
 
-                return (
-                    f"Thời tiết tại {location}: {weather_desc}.\n"
-                    f"Nhiệt độ: {temp}°C, Độ ẩm: {humidity}%, Gió: {wind_speed} m/s."
-                )
-            else:
-                return f"Không tìm thấy thông tin thời tiết cho {location}."
-        except Exception as e:
-            return f"Lỗi khi gọi API thời tiết: {str(e)}"
+    document_str = json.dumps(document["answer"], ensure_ascii=False, indent=2)
+    references_str = "\n".join(document["references"])
 
-# Thay API_KEY bằng khóa API thực của bạn
-API_KEY = "b13f85eb589c453522bb1322a6763a8d"
-weather_api = WeatherAPIWrapper(API_KEY)
+    chain = travel_info_prompt_template | chatbot.llm_gemini | StrOutputParser()
 
-"""
-    cau hoi: "Thời tiết tại Hà Nội bây giờ thế nào?"
-    -> get_location -> "Hà Nội" -> get_weather("Hà Nội")
-    
-    
-"""
+    response = chain.invoke({
+        "input": query,
+        "documents": document_str,
+        "references": references_str
+    })
+    return response

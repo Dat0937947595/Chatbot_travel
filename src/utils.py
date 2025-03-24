@@ -16,7 +16,7 @@ def remove_only_think(response):
     """Loại bỏ nội dung trong <think> nhưng giữ nguyên định dạng."""
     return re.sub(r'<think>[\s\S]*?</think>', '', response, flags=re.DOTALL)
 
-def reciprocal_rank_fusion(results: list[list], k=100, top_n=4):
+def reciprocal_rank_fusion(results: list[list], k=60, top_n=5):
     """Hợp nhất kết quả tìm kiếm bằng Reciprocal Rank Fusion."""
     fused_scores = {}
     for docs in results:
