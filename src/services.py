@@ -354,3 +354,14 @@ def price_search_function(chatbot, query):
         "references": references_str
     })
     return response
+
+"""
+Q: 
+A: Root
+Output: gemini-2.0-flash | deepseek | llama-70b
+
+---
+
+Hybrid | BM25 | similarity
+
+"""
