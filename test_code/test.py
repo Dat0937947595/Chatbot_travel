@@ -19,24 +19,29 @@ from src.chatbot import Chatbot
 from langchain_community.utilities import OpenWeatherMapAPIWrapper
 
 from dotenv import load_dotenv
+import datetime
+import time
+import dateparser
 
 # Load biến môi trường
 load_dotenv()
 
 
-print(os.getenv("GOOGLE_API_KEY"))
-# llm = ChatGoogleGenerativeAI(
-#     model="gemini-2.0-flash", 
-#     google_api_key="AIzaSyA-MAlE62P8Gg2g664zwnYcRAtNykEg_tE"
-# )
+def get_time_function(query):
+    # Xác định ngày hiện tại từ hệ thống
+    current_date = datetime.datetime.now()
+    current_timezone = time.tzname[0]  # Lấy tên múi giờ hiện tại
+    
+    # Xử lý truy vấn để hiểu ngữ nghĩa dựa trên ngày hiện tại
+    parsed_date = dateparser.parse(query, settings={"RELATIVE_BASE": current_date})
+    
+    if parsed_date:
+        formatted_date = parsed_date.strftime("%Y-%m-%d")
+        formatted_time = parsed_date.strftime("%H:%M:%S")
+        response = f"Thời gian bạn yêu cầu là {formatted_time} ngày {formatted_date}, múi giờ: {current_timezone}."
+    else:
+        response = f"Không thể xác định thời gian từ truy vấn '{query}'. Thời gian hiện tại là {current_date.strftime('%H:%M:%S')} ngày {current_date.strftime('%Y-%m-%d')}, múi giờ: {current_timezone}."
+    
+    return response
 
-# from googlesearch import search
-
-# def google_search(query, num_results=5):
-#     search_results = search(query, num_results=num_results)
-#     return search_results
-
-# # Ví dụ sử dụng
-# results = google_search("giá vé xe khách từ TP.HCM đi Đà Lạt")
-# for result in results:
-#     print(result)
+print(get_time_function("Cho tôi biết 2 ngày tới là ngày bao nhiêu?"))

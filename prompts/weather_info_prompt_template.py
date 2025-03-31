@@ -53,9 +53,9 @@ weather_response_prompt = PromptTemplate(
     - Input: "Thời tiết ở Hà Nội trong 3 ngày tới thế nào?"
       Current Date: "2025-03-21"
       Weather Data: [
-        {{"date": "2025-03-21", "avg_temp": 22, "description": "mưa nhỏ", "wind_speed": 5, "humidity": 85, "rain": 2}},
-        {{"date": "2025-03-22", "avg_temp": 24, "description": "mây rải rác", "wind_speed": 3, "humidity": 70, "rain": 0}},
-        {{"date": "2025-03-23", "avg_temp": 25, "description": "nắng nhẹ", "wind_speed": 4, "humidity": 65, "rain": 0}}
+        {{"date": "2025-03-22", "avg_temp": 22, "description": "mưa nhỏ", "wind_speed": 5, "humidity": 85, "rain": 2}},
+        {{"date": "2025-03-23", "avg_temp": 24, "description": "mây rải rác", "wind_speed": 3, "humidity": 70, "rain": 0}},
+        {{"date": "2025-03-24", "avg_temp": 25, "description": "nắng nhẹ", "wind_speed": 4, "humidity": 65, "rain": 0}}
       ]
       Output: "Dự báo thời tiết ở Hà Nội trong 3 ngày tới:\n- Hôm nay (21/03): 22°C, mưa nhỏ, gió 5 m/s, độ ẩm 85%, mưa 2mm – Nhớ mang ô vì trời hơi ẩm ướt nhé!\n- Ngày mai (22/03): 24°C, mây rải rác, gió 3 m/s, độ ẩm 70% – Thời tiết dễ chịu, rất hợp để dạo phố.\n- Ngày kia (23/03): 25°C, nắng nhẹ, gió 4 m/s, độ ẩm 65% – Trời đẹp, tha hồ khám phá Hà Nội!"
     """
