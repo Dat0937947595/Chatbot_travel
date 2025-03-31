@@ -41,7 +41,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Services")
 
 # Khởi tạo Tavily Client
-tavily_client = TavilyClient(api_key="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")
+tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
 """Sinh phản hồi dựa trên truy vấn và ngữ cảnh, sử dụng danh sách câu hỏi từ query_generation_chain."""
 def generate_response(chatbot, user_input, prompt_template_for_query):
@@ -239,7 +239,7 @@ def itinerary_planner_function(chatbot, query):
 
 """" --------------------------------- """
 """Lấy thời gian hiện tại và múi giờ của các địa điểm du lịch."""
-def get_time_function():
+def get_time_function(chatbot, query):
     # Dùng thư viện time để lấy thời gian hiện tại
     current_time = time.strftime("%H:%M:%S", time.localtime())
     current_date = time.strftime("%Y-%m-%d", time.localtime())
@@ -252,6 +252,7 @@ def get_time_function():
 
 """ --------------------------------- """
 """Hàm tra cứu và sinh phản hồi thời tiết chi tiết cho chatbot du lịch."""
+# Hàm tra cứu và sinh phản hồi thời tiết
 def weather_info_function(chatbot, query):
     BASE_URL = "http://api.openweathermap.org/data/2.5/forecast"
 
@@ -265,12 +266,7 @@ def weather_info_function(chatbot, query):
         return "<Ask> Tôi không hiểu yêu cầu của bạn. Vui lòng thử lại."
 
     city = extract_result.get("city")
-    days_requested = extract_result.get("days", 1)
-    days_to_fetch = min(days_requested, 5)  # Giới hạn API miễn phí
-
-    # Xác định ngày hiện tại (hôm nay)
-    # Trong thực tế, sử dụng: current_date = datetime.now()
-    current_date = datetime.now()
+    current_date = datetime.strptime("2025-03-31", "%Y-%m-%d")  # Giả lập ngày hiện tại
     current_date_str = current_date.strftime("%Y-%m-%d")
 
     # Gọi API OpenWeatherMap
@@ -288,75 +284,23 @@ def weather_info_function(chatbot, query):
             logger.warning(f"API error: {data.get('message')}")
             return "<Ask> Không tìm thấy thông tin thời tiết cho thành phố này."
 
-        # Nhóm dữ liệu theo ngày
-        forecast_by_day = {}
-        for item in data["list"]:
-            date = datetime.fromtimestamp(item["dt"]).strftime("%Y-%m-%d")
-            if date not in forecast_by_day:
-                forecast_by_day[date] = {
-                    "temps": [],
-                    "descriptions": [],
-                    "wind_speeds": [],
-                    "humidities": [],
-                    "rain": 0  # Khởi tạo lượng mưa bằng 0
-                }
-            forecast_by_day[date]["temps"].append(item["main"]["temp"])
-            forecast_by_day[date]["descriptions"].append(item["weather"][0]["description"])
-            forecast_by_day[date]["wind_speeds"].append(item["wind"]["speed"])
-            forecast_by_day[date]["humidities"].append(item["main"]["humidity"])
-            # Cộng dồn lượng mưa trong ngày
-            forecast_by_day[date]["rain"] += item.get("rain", {}).get("3h", 0)  # Sửa từ max thành +=
-
-        # Tạo dữ liệu thời tiết
-        weather_summary = []
-        for i, (date, info) in enumerate(forecast_by_day.items()):
-            if i >= days_to_fetch:
-                break
-            weather_summary.append({
-                "date": date,
-                "avg_temp": round(sum(info["temps"]) / len(info["temps"]), 1),
-                "description": max(set(info["descriptions"]), key=info["descriptions"].count),
-                "wind_speed": round(sum(info["wind_speeds"]) / len(info["wind_speeds"]), 1),
-                "humidity": round(sum(info["humidities"]) / len(info["humidities"])),
-                "rain": round(info["rain"], 1)  # Lượng mưa đã được cộng dồn
-            })
-
     except Exception as e:
         logger.error(f"Error fetching weather data: {str(e)}")
-        return f"<Ask> Lỗi khi tra cứu thời tiết: {str(e)}. Bạn vui lòng đặt câu hỏi càng rõ ràng để tôi giúp bạn trả lời tốt hơn nhé."
+        return f"<Ask> Lỗi khi tra cứu thời tiết: {str(e)}. Vui lòng thử lại."
 
-    # Chain sinh phản hồi
+    # Chain sinh phản hồi (truyền JSON thô)
     response_chain = weather_response_prompt | chatbot.llm_gemini | StrOutputParser()
     try:
         response = response_chain.invoke({
             "query": query,
-            "weather_data": json.dumps(weather_summary, ensure_ascii=False),
-            "days_requested": days_requested,
-            "current_date": current_date_str  # Truyền ngày hiện tại vào prompt
+            "weather_data": json.dumps(data, ensure_ascii=False),  # Truyền toàn bộ JSON thô
+            "current_date": current_date_str
         })
         logger.info(f"Generated response: {response}")
         return response
     except Exception as e:
         logger.error(f"Error generating response: {str(e)}")
-        # Phản hồi dự phòng
-        response = f"Dự báo thời tiết ở {city}:\n"
-        for day in weather_summary:
-            # Ánh xạ ngày trong phản hồi dự phòng
-            day_date = datetime.strptime(day['date'], "%Y-%m-%d")
-            delta = (day_date - current_date).days
-            if delta == 0:
-                day_label = "Hôm nay"
-            elif delta == 1:
-                day_label = "Ngày mai"
-            elif delta == 2:
-                day_label = "Ngày kia"
-            else:
-                day_label = f"ngày {day_date.strftime('%d/%m')}"
-            rain_info = f", mưa {day['rain']}mm" if day['rain'] > 0 else ""
-            response += f"- {day_label}: {day['avg_temp']}°C, {day['description']}, gió {day['wind_speed']} m/s, độ ẩm {day['humidity']}%{rain_info}.\n"
-        if days_requested > 5:
-            response += "Tôi chỉ có dữ liệu 5 ngày thôi, bạn quay lại hỏi thêm sau nhé!"
-        return response
+        return f"<Ask> Lỗi khi xử lý dữ liệu thời tiết: {str(e)}. Vui lòng thử lại."
 
 
 """ --------------------------------- """
