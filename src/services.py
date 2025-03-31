@@ -3,11 +3,13 @@ import sys
 # Thêm thư mục gốc (CHATBOT_TRAVEL) vào sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# Import các thư viện cần thiết
 import logging
 import requests
 from datetime import datetime
 import json
 import time
+from tavily import TavilyClient
 
 # Import các thư viện từ LangChain và các thư viện khác
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
@@ -21,9 +23,9 @@ from pydantic import Field
 # import prompt templates
 from prompts.query_history_prompt_template import query_history_prompt_template
 from prompts.location_info_prompt_template import location_info_prompt
-from prompts.itinerary_planner_prompt_template import itinerary_planner_prompt
+from prompts.itinerary_planner_prompt_template import itinerary_planner_prompt_template
 from prompts.weather_info_prompt_template import extract_info_prompt, weather_response_prompt
-from prompts.price_search_prompt_template import travel_info_prompt_template
+from prompts.price_search_prompt_template import price_prompt
 
 # import utils
 from src.utils import *
@@ -37,6 +39,9 @@ load_dotenv()
 # Logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Services")
+
+# Khởi tạo Tavily Client
+tavily_client = TavilyClient(api_key="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")
 
 """Sinh phản hồi dựa trên truy vấn và ngữ cảnh, sử dụng danh sách câu hỏi từ query_generation_chain."""
 def generate_response(chatbot, user_input, prompt_template_for_query):
@@ -157,9 +162,93 @@ def location_info_function(chatbot, query):
 
 """ --------------------------------- """
 """Xử lý các câu hỏi liên quan đến lập kế hoạch du lịch."""
+# Hàm lập kế hoạch tối ưu
 def itinerary_planner_function(chatbot, query):
-    return generate_response(chatbot, query, itinerary_planner_prompt)
+    """Lập kế hoạch chuyến đi chi tiết, tích hợp thông tin từ các tool khác."""
+    
+    extract_prompt = PromptTemplate(
+        input_variables=["query"],
+        template="""
+        Trích xuất thông tin từ câu hỏi để lập kế hoạch du lịch:
+        - Thời gian chuyến đi (số ngày, số đêm nếu có).
+        - Điểm đến.
+        - Sở thích (nghỉ dưỡng, văn hóa, ẩm thực, phiêu lưu, gia đình, ...).
+        - Ngân sách (cao cấp, trung bình, tiết kiệm - nếu có).
+        - Phương tiện di chuyển (nếu có).
+        Câu hỏi: "{query}"
+        Trả về JSON: 
+        {{"duration": "<số ngày/ngày+đêm>", "destination": "<điểm đến>", "preferences": "<sở thích>", "budget": "<ngân sách>", "transport": "<phương tiện>"}}
+        Nếu thiếu thông tin, để giá trị là null.
+        """
+    )
+    
+    extract_chain = extract_prompt | chatbot.llm_gemini | JsonOutputParser()
+    try:
+        extracted_info = extract_chain.invoke({"query": query})
+        logger.info(f"Extracted info: {extracted_info}")
+    except Exception as e:
+        logger.error(f"Error extracting info: {str(e)}")
+        return "<Ask> Vui lòng cung cấp thông tin rõ ràng hơn (địa điểm, thời gian, sở thích)."
 
+    if not extracted_info.get("destination") or not extracted_info.get("duration"):
+        return "<Ask> Bạn muốn đi đâu và trong bao lâu?"
+
+    destination = extracted_info["destination"]
+    duration = extracted_info["duration"]
+    preferences = extracted_info.get("preferences", "khám phá chung")
+    budget = extracted_info.get("budget", "trung bình")
+    transport = extracted_info.get("transport", "taxi/xe máy")
+
+    # Lấy thông tin bổ sung
+    try:
+        weather_query = f"Thời tiết ở {destination} trong {duration}"
+        weather_data = chatbot.executor.invoke({"input": weather_query})
+        if "<Ask>" in weather_data:
+            weather_data = "Thời tiết bình thường."
+
+        location_query = f"Thông tin về {destination}"
+        location_data = chatbot.executor.invoke({"input": location_query})
+        if "<Ask>" in location_data:
+            location_data = f"{destination} là một điểm đến phổ biến."
+
+        price_query = f"Giá dịch vụ du lịch ở {destination} (khách sạn, vé tham quan, ăn uống)"
+        price_data = chatbot.executor.invoke({"input": price_query})
+        if "<Ask>" in price_data:
+            price_data = "Giá cả trung bình."
+
+    except Exception as e:
+        logger.error(f"Error fetching data: {str(e)}")
+        weather_data = "Thời tiết bình thường."
+        location_data = f"{destination} là một điểm đến phổ biến."
+        price_data = "Giá cả trung bình."
+
+    # Sinh lịch trình
+    response_chain = itinerary_planner_prompt_template | chatbot.llm_gemini | StrOutputParser()
+    try:
+        response = response_chain.invoke({
+            "query": query,
+            "retrieved_context": chatbot.retriever.invoke(query),
+            "weather_data": weather_data,
+            "location_data": location_data,
+            "price_data": price_data
+        })
+        return response
+    except Exception as e:
+        logger.error(f"Error generating itinerary: {str(e)}")
+        return f"Lỗi khi lập kế hoạch: {str(e)}. Vui lòng thử lại."
+
+"""" --------------------------------- """
+"""Lấy thời gian hiện tại và múi giờ của các địa điểm du lịch."""
+def get_time_function():
+    # Dùng thư viện time để lấy thời gian hiện tại
+    current_time = time.strftime("%H:%M:%S", time.localtime())
+    current_date = time.strftime("%Y-%m-%d", time.localtime())
+    current_timezone = time.tzname[0]  # Lấy tên múi giờ hiện tại
+    
+    # Tạo phản hồi
+    response = f"Thời gian hiện tại là {current_time} ngày {current_date}, múi giờ: {current_timezone}."
+    
+    return response
 
 """ --------------------------------- """
 """Hàm tra cứu và sinh phản hồi thời tiết chi tiết cho chatbot du lịch."""
@@ -271,86 +360,39 @@ def weather_info_function(chatbot, query):
 
 
 """ --------------------------------- """
-"""Tìm kiếm thông tin giá vé, dịch vụ du lịch trên internet."""
-class CustomGoogleSearchAPIWrapperContent(GoogleSearchAPIWrapper):
-    def __init__(self, google_api_key=None, google_cse_id=None, **kwargs):
-        """
-            Bỏ key trong file .env
-        """
-        google_api_key = google_api_key or os.getenv("GOOGLE_API_KEY")
-        google_cse_id = google_cse_id or os.getenv("GOOGLE_CSE_ID")
+# Hàm tìm kiếm với Tavily
+def tavily_search(query: str) -> str:
+    try:
+        results = tavily_client.search(query=query, search_depth="advanced", max_results=5)
+        if not results or "results" not in results:
+            return "Không tìm thấy kết quả phù hợp."
 
-        kwargs.setdefault("google_api_key", google_api_key)
-        kwargs.setdefault("google_cse_id", google_cse_id)
+        response = []
+        for item in results["results"]:
+            title = item.get("title", "Không có tiêu đề")
+            snippet = item.get("content", "Không có mô tả")
+            url = item.get("url", "Không có đường dẫn")
+            published_date = item.get("published_date", "Không rõ ngày xuất bản")
+            response.append(f"**{title}** (Ngày: {published_date})\n{snippet}\n[Xem chi tiết]({url})")
+        
+        return "\n\n".join(response)
+    except Exception as e:
+        logger.error(f"Error with Tavily search: {str(e)}")
+        return f"Lỗi khi tìm kiếm: {str(e)}"
 
-        super().__init__(**kwargs)
-
-    def get_page_content(self, url):
-        """Trích xuất nội dung chính từ trang web. Nếu fail, trả về None."""
-        try:
-            loader = WebBaseLoader(
-                url,
-                requests_per_second = 1
-            )
-            docs = loader.load()
-            if not docs:
-                return None
-            content = docs[0].page_content
-            # Xử lý lỗi font/encoding nếu cần
-            try:
-                content.encode("utf-8").decode("utf-8")
-            except UnicodeDecodeError:
-                content = content.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
-            return content[:3000]  # Giới hạn độ dài để tránh input quá tải
-        except Exception as e:
-            print(f"[ERROR] Không thể tải nội dung từ {url}: {e}")
-            return None
-
-    def run(self, query, num_results=3):
-        search_results = self.results(query, num_results=num_results)
-        if not search_results:
-            return {
-                "answer": "Không tìm thấy kết quả phù hợp.",
-                "references": [],
-            }
-
-        content_list = []
-        references = []
-
-        for result in search_results:
-            url = result.get("link")
-            if not url:
-                continue
-            references.append(url)
-
-            page_text = self.get_page_content(url)
-            if page_text:
-                content_list.append(f"{result['title']} ({url}):\n{page_text}\n")
-            else:
-                content_list.append(f"{result['title']} ({url}): Không thể lấy dữ liệu.\n")
-
-        full_content = "\n\n".join(content_list)
-
-        return {
-            "answer": full_content,
-            "references": references,
-        }
-
-# Hàm gọi chatbot với thông tin tìm kiếm
-search_tool = CustomGoogleSearchAPIWrapperContent()
-
-def price_search_function(chatbot, query):
-    query += " mới nhất"
-    document = search_tool.run(query)
-
-    document_str = json.dumps(document["answer"], ensure_ascii=False, indent=2)
-    references_str = "\n".join(document["references"])
-
-    chain = travel_info_prompt_template | chatbot.llm_gemini | StrOutputParser()
-
-    response = chain.invoke({
-        "input": query,
-        "documents": document_str,
-        "references": references_str
-    })
-    return response
+# Hàm tìm kiếm giá vé, dịch vụ du lịch
+def price_search_function(chatbot, query: str) -> str:
+    # Thêm "mới nhất" để đảm bảo thông tin cập nhật
+    search_query = f"{query} mới nhất"
+    search_results = tavily_search(search_query)
+    
+    response_chain = price_prompt | chatbot.llm_gemini | StrOutputParser()
+    try:
+        response = response_chain.invoke({
+            "query": query,
+            "search_results": search_results
+        })
+        return response
+    except Exception as e:
+        logger.error(f"Error generating price response: {str(e)}")
+        return f"Không thể tìm thông tin giá chính xác cho '{query}'. Bạn có thể thử lại hoặc kiểm tra trực tiếp qua các trang web du lịch."
