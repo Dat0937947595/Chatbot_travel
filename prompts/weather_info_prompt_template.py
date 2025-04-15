@@ -67,6 +67,7 @@ weather_response_prompt = PromptTemplate(
     - Giữ giọng điệu thân thiện, ngắn gọn, như một người bạn đồng hành.
 
     **Ví dụ**:
+    <example>
     - Input: "Thời tiết ở Hà Nội 10 ngày tới thế nào?"
       Current Date: "2025-03-31"
       Weather Data: {{"list": [
@@ -74,5 +75,6 @@ weather_response_prompt = PromptTemplate(
         {{"dt_txt": "2025-04-02 18:00:00", "main": {{"temp": 27.5}}, "weather": [{{"description": "nắng nhẹ"}}], "wind": {{"speed": 3.5}}, "main": {{"humidity": 70}}, "rain": {{"3h": 0}}}}
       ]}}
       Output: "Dự báo thời tiết ở Hà Nội:\n- Ngày mai (01/04): 26°C, mây đen u ám, gió 4.4 m/s, độ ẩm 76% – Trời âm u chút, nhưng vẫn ổn để dạo chơi!\n- Ngày kia (02/04): 27.5°C, nắng nhẹ, gió 3.5 m/s, độ ẩm 70% – Trời đẹp, tha hồ khám phá!\nHiện tại mình chỉ có dữ liệu đến ngày 04/04 thôi, bạn quay lại hỏi thêm sau nhé!"
+    </example>
     """
 )

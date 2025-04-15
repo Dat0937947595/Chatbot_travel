@@ -84,49 +84,6 @@ def generate_response(chatbot, user_input, prompt_template_for_query):
 
     return final_rag_chain.invoke({"question": user_input})
 
-# """Sinh phản hồi dựa trên truy vấn và ngữ cảnh, sử dụng danh sách câu hỏi từ query_generation_chain."""
-# def generate_response(chatbot, user_input, prompt_template_for_query):
-#     # logger.info(f"\nSinh ra câu trả lời từ câu truy vấn: {user_input}\n")
-    
-#     # Lấy danh sách câu hỏi từ query_generation_chain
-#     def get_questions(x):
-#         result = chatbot.query_generation_chain.invoke({"question": x})
-#         try:
-            
-#             logger.info(f"\nKết quả từ query_generation_chain: {result}\n")
-#             # Lấy danh sách câu hỏi từ key "questions"
-#             return result["questions"]
-#         except (KeyError, TypeError) as e:
-#             logger.error(f"Lỗi khi xử lý output từ query_generation_chain: {e}")
-#             return [x]  # Trả về câu hỏi gốc nếu có lỗi
-    
-#     cleaned_query_generation = RunnableLambda(get_questions)
-    
-#     retrieval_chain_rag_fusion = (
-#         cleaned_query_generation
-#         | chatbot.retriever.map()  # Áp dụng retriever cho từng câu hỏi trong danh sách
-#         | RunnableLambda(lambda results: reciprocal_rank_fusion(results))  # Gộp kết quả
-#     )
-    
-#     document_retrieval_chain = retrieval_chain_rag_fusion.invoke({"question": user_input})
-#     logger.info(f"\nGọi RAG Fusion chain với câu truy vấn: {user_input}\n {document_retrieval_chain}\n")
-    
-#     def format_input(inputs):
-#         context_result = retrieval_chain_rag_fusion.invoke(inputs)
-#         return {"retrieved_context": context_result, "question": inputs["question"]}
-    
-#     formatted_prompt = RunnableLambda(lambda x: prompt_template_for_query.format(**x))
-    
-#     final_rag_chain = (
-#         RunnableLambda(format_input)
-#         | formatted_prompt
-#         | chatbot.llm_gemini
-#         | StrOutputParser()
-#     )
-    
-#     return final_rag_chain.invoke({"question": user_input})
-
-
 """Tinh chỉnh truy vấn, trả lời trực tiếp, hoặc hỏi lại nếu thiếu ngữ cảnh."""
 def context_enhancer_function(chatbot, query):
     chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
@@ -203,94 +160,6 @@ def location_info_function(chatbot, query):
 
 """ --------------------------------- """
 """Xử lý các câu hỏi liên quan đến lập kế hoạch du lịch."""
-# Hàm lập kế hoạch tối ưu
-# def itinerary_planner_function(chatbot, query):
-#     """Lập kế hoạch chuyến đi chi tiết, tích hợp thông tin từ các tool khác."""
-    
-#     extract_prompt = PromptTemplate(
-#         input_variables=["query"],
-#         template="""
-#         Trích xuất thông tin từ câu hỏi để lập kế hoạch du lịch:
-#         - Thời gian chuyến đi (số ngày, số đêm nếu có).
-#         - Điểm đến.
-#         - Sở thích (nghỉ dưỡng, văn hóa, ẩm thực, phiêu lưu, gia đình, ...).
-#         - Ngân sách (cao cấp, trung bình, tiết kiệm - nếu có).
-#         - Phương tiện di chuyển (nếu có).
-#         Câu hỏi: "{query}"
-#         Trả về JSON: 
-#         {{"duration": "<số ngày/ngày+đêm>", "destination": "<điểm đến>", "preferences": "<sở thích>", "budget": "<ngân sách>", "transport": "<phương tiện>"}}
-#         Nếu thiếu thông tin, để giá trị là null.
-#         """
-#     )
-    
-#     extract_chain = extract_prompt | chatbot.llm_gemini | JsonOutputParser()
-#     try:
-#         extracted_info = extract_chain.invoke({"query": query})
-#         logger.info(f"Extracted info: {extracted_info}")
-#     except Exception as e:
-#         logger.error(f"Error extracting info: {str(e)}")
-#         return "<Ask> Vui lòng cung cấp thông tin rõ ràng hơn (địa điểm, thời gian, sở thích)."
-
-#     if not extracted_info.get("destination") or not extracted_info.get("duration"):
-#         return "<Ask> Bạn muốn đi đâu và trong bao lâu?"
-
-#     destination = extracted_info["destination"]
-#     duration = extracted_info["duration"]
-#     preferences = extracted_info.get("preferences", "khám phá chung")
-#     budget = extracted_info.get("budget", "trung bình")
-#     transport = extracted_info.get("transport", "taxi/xe máy")
-
-#     # Lấy thông tin bổ sung
-#     try:
-#         weather_query = f"Thời tiết ở {destination} trong {duration}"
-#         weather_data = chatbot.executor.invoke({"input": weather_query})
-#         if "<Ask>" in weather_data:
-#             weather_data = "Thời tiết bình thường."
-
-#         location_query = f"Thông tin về {destination}"
-#         location_data = chatbot.executor.invoke({"input": location_query})
-#         if "<Ask>" in location_data:
-#             location_data = f"{destination} là một điểm đến phổ biến."
-
-#         price_query = f"Giá dịch vụ du lịch ở {destination} (khách sạn, vé tham quan, ăn uống)"
-#         price_data = chatbot.executor.invoke({"input": price_query})
-#         if "<Ask>" in price_data:
-#             price_data = "Giá cả trung bình."
-
-#     except Exception as e:
-#         logger.error(f"Error fetching data: {str(e)}")
-#         weather_data = "Thời tiết bình thường."
-#         location_data = f"{destination} là một điểm đến phổ biến."
-#         price_data = "Giá cả trung bình."
-
-#     # Sinh lịch trình
-#     response_chain = itinerary_planner_prompt_template | chatbot.llm_gemini | StrOutputParser()
-#     try:
-#         response = response_chain.invoke({
-#             "query": query,
-#             "retrieved_context": chatbot.retriever.invoke(query),
-#             "weather_data": weather_data,
-#             "location_data": location_data,
-#             "price_data": price_data
-#         })
-#         return response
-#     except Exception as e:
-#         logger.error(f"Error generating itinerary: {str(e)}")
-#         return f"Lỗi khi lập kế hoạch: {str(e)}. Vui lòng thử lại."
-
-# """" --------------------------------- """
-# """Lấy thời gian hiện tại và múi giờ của các địa điểm du lịch."""
-# def get_time_function(chatbot, query):
-#     # Dùng thư viện time để lấy thời gian hiện tại
-#     current_time = time.strftime("%H:%M:%S", time.localtime())
-#     current_date = time.strftime("%Y-%m-%d", time.localtime())
-#     current_timezone = time.tzname[0]  # Lấy tên múi giờ hiện tại
-    
-#     # Tạo phản hồi
-#     response = f"Thời gian hiện tại là {current_time} ngày {current_date}, múi giờ: {current_timezone}."
-    
-#     return response
-
 def itinerary_planner_function(chatbot, query):
     """Lập kế hoạch chuyến đi chi tiết, tích hợp thông tin từ các tool khác."""
 
@@ -364,8 +233,6 @@ def itinerary_planner_function(chatbot, query):
     except Exception as e:
         return f"Lỗi khi lập kế hoạch: {str(e)}. Vui lòng thử lại."
 
-
-
 """" --------------------------------- """
 """Lấy thời gian hiện tại và múi giờ của các địa điểm du lịch."""
 def get_time_function(chatbot, query):
@@ -396,8 +263,8 @@ def weather_info_function(chatbot, query):
         return "<Ask> Tôi không hiểu yêu cầu của bạn. Vui lòng thử lại."
 
     city = extract_result.get("city")
-    current_date = datetime.strptime("2025-03-31", "%Y-%m-%d")  # Giả lập ngày hiện tại
-    current_date_str = current_date.strftime("%Y-%m-%d")
+    # current_date = time.strftime("%Y-%m-%d", time.localtime())
+    current_date_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
     # Gọi API OpenWeatherMap
     try:

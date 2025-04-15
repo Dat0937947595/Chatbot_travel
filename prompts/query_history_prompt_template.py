@@ -31,6 +31,7 @@ Bạn là một trợ lý du lịch thông minh, chuyên xử lý truy vấn d�
 ---
 
 ### Ví dụ
+<example>
 1. **Lịch sử**: [
       {{"role": "user", "content": "Tôi muốn đi Đà Nẵng"}},
       {{"role": "assistant", "content": "Bạn muốn đi Đà Nẵng khi nào?"}}
@@ -62,7 +63,7 @@ Bạn là một trợ lý du lịch thông minh, chuyên xử lý truy vấn d�
    ]
    **Truy vấn**: "Xa trung tâm không?"
    **Phản hồi**: {{"refined_query": "Bà Nà Hills và Ngũ Hành Sơn ở Đà Nẵng cách trung tâm bao xa?"}}
-
+</example>
 ---
 
 ### Đầu ra cuối cùng
