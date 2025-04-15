@@ -89,7 +89,7 @@ class Chatbot:
             
             Tool(name="TavilySearch", func=tavily_search, description="Tìm kiếm thông tin từ web bằng Tavily và trả về nội dung cùng đường link nguồn."),
             
-            Tool(name="GetTimeAgent", func=partial(get_time_function, self), description="Thông tin thời gian (ví dụ ngày hôm nay, giờ hiện tại, ...).")
+            # Tool(name="GetTimeAgent", func=partial(get_time_function, self), description="Thông tin thời gian (ví dụ ngày hôm nay, giờ hiện tại, ...).")
         ]
 
     def _initialize_agent(self, verbose=False):

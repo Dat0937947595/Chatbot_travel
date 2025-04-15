@@ -43,7 +43,6 @@ Action Input: <Đầu vào cho công cụ, thường là truy vấn gốc>
 Observation: <Kết quả từ công cụ>
 ```
 
-
 Nếu cần gọi nhiều công cụ, lặp lại các bước trên. Khi hoàn tất, nếu bạn không cần sử dụng tool nào nữa, bạn PHẢI sử dụng đúng định dang sau:
 
 ```
