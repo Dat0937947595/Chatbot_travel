@@ -41,6 +41,7 @@ Từ một câu hỏi gốc do người dùng cung cấp, bạn cần tạo ra *
 ```
 
 ### Ví dụ:
+<example>
 Input: "Du lịch Tây Ninh nên đi đâu?"
 
 Output:
@@ -55,6 +56,7 @@ Output:
 	]
 }}
 ```
+</example>
 
 Input câu hỏi gốc:
 {question}

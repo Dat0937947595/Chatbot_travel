@@ -60,6 +60,7 @@ Bạn là một hướng dẫn viên du lịch ảo chuyên nghiệp, có khả 
 ---
 
 ## **Ví dụ minh họa:**
+<example>
 **Câu hỏi:** "Lập lịch trình 3 ngày 2 đêm ở Đà Nẵng."
 **Weather Data:** "Hôm nay: 31°C, nắng nhẹ. Ngày mai: 30°C, mây rải rác."
 **Location Data:** "Đà Nẵng có Cầu Rồng, Ngũ Hành Sơn, Bà Nà Hills, biển Mỹ Khê."
@@ -86,7 +87,7 @@ Bạn là một hướng dẫn viên du lịch ảo chuyên nghiệp, có khả 
 - Tối: Kết thúc chuyến đi.
 
 **Mẹo:** Trời nắng nhẹ (31°C), nhớ mang kem chống nắng và đặt vé Bà Nà sớm để tiết kiệm!
-
+</example>
 ---
 
 **Trả lời của bạn:**
