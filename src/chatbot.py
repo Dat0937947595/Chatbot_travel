@@ -41,7 +41,7 @@ class Chatbot:
         self.model = Model()
         self.llm_gemini = self.model.get_llm_gemini()
         self.embedding_model = self.model.get_embedding()
-
+        self.date_time = ""
         # Lịch sử hội thoại và truy vấn
         self.query = ""
         self.memory = ConversationBufferMemory(
@@ -70,7 +70,7 @@ class Chatbot:
             tools=self.tools,
             memory=self.memory,
             verbose=verbose,  #  Tùy chọn bật/tắt log chi tiết
-            handle_parsing_errors=True  # Tự động xử lý lỗi parsing
+            handle_parsing_errors=False  # Tự động xử lý lỗi parsing
         )
 
     def _initialize_tools(self):
@@ -89,11 +89,7 @@ class Chatbot:
             
             Tool(name="TavilySearch", func=tavily_search, description="Tìm kiếm thông tin từ web bằng Tavily và trả về nội dung cùng đường link nguồn."),
             
-            Tool(
-                name="GetTimeAgent",
-                func=partial(get_time_function, self),
-                description="Thông tin thời gian (ví dụ ngày hôm nay, giờ hiện tại, ...)"
-            )
+            Tool(name="GetTimeAgent", func=partial(get_time_function, self), description="Thông tin thời gian (ví dụ ngày hôm nay, giờ hiện tại, ...).")
         ]
 
     def _initialize_agent(self, verbose=False):
@@ -107,6 +103,12 @@ class Chatbot:
     def get_query(self, query):
         """Lưu trữ truy vấn người dùng."""
         self.query = query
+
+    def get_date_time(self, date_time):
+        self.date_time = date_time
+
+    def print_date_time(self):
+        return self.date_time
 
     def chat(self, user_input):
         """Xử lý đầu vào người dùng và trả về phản hồi."""
