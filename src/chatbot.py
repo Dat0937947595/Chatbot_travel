@@ -75,21 +75,51 @@ class Chatbot:
 
     def _initialize_tools(self):
         return [
-            Tool(name="ContextEnhancerAgent", func=partial(context_enhancer_function, self), description="Tinh chỉnh truy vấn hoặc hỏi lại nếu thiếu ngữ cảnh."),
+            Tool(
+                name="ContextEnhancerAgent", 
+                func=partial(context_enhancer_function, self), 
+                description="Tinh chỉnh truy vấn hoặc hỏi lại nếu thiếu ngữ cảnh."
+                ),
             
-            Tool(name="NotRelevantAgent", func=partial(not_relevant_function, self), description="Xử lý câu hỏi không liên quan hoặc chào hỏi."),
+            Tool(
+                name="NotRelevantAgent", 
+                func=partial(not_relevant_function, self),
+                description="Xử lý câu hỏi không liên quan hoặc chào hỏi."
+                ),
             
-            Tool(name="LocationAgent", func=partial(location_info_function, self), description="Thông tin địa điểm từ cơ sở dữ liệu."),
+            Tool(
+                name="LocationAgent", 
+                func=partial(location_info_function, self), 
+                description="Thông tin địa điểm từ cơ sở dữ liệu."
+                ),
             
-            Tool(name="WeatherAgent", func=partial(weather_info_function, self), description="Thông tin liên quan đến thời tiết."),
+            Tool(
+                name="WeatherAgent", 
+                func=partial(weather_info_function, self), 
+                description="Thông tin liên quan đến thời tiết."
+                ),
             
-            Tool(name="PlanAgent", func=partial(itinerary_planner_function, self), description="Lập kế hoạch chuyến đi từ cơ sở dữ liệu."),
+            Tool(
+                name="PlanAgent", 
+                func=partial(itinerary_planner_function, self), 
+                description="Lập kế hoạch chuyến đi từ cơ sở dữ liệu."
+                ),
         
-            Tool(name="PriceSearchAgent", func=partial(price_search_function, self), description="Thông tin giá các dịch vụ du lịch bằng Tavily."),
+            Tool(
+                name="PriceSearchAgent", 
+                func=partial(price_search_function, self), 
+                description="Thông tin giá các dịch vụ du lịch bằng Tavily."
+                ),
             
-            Tool(name="TavilySearch", func=tavily_search, description="Tìm kiếm thông tin từ web bằng Tavily và trả về nội dung cùng đường link nguồn."),
+            Tool(
+                name="TavilySearch", 
+                func=tavily_search, 
+                description="Tìm kiếm thông tin từ web bằng Tavily và trả về nội dung cùng đường link nguồn."),
             
-            # Tool(name="GetTimeAgent", func=partial(get_time_function, self), description="Thông tin thời gian (ví dụ ngày hôm nay, giờ hiện tại, ...).")
+            Tool(
+                name="GetTimeAgent", 
+                func=partial(get_time_function, self), 
+                description="Thông tin thời gian (ví dụ ngày hôm nay, giờ hiện tại, ...).")
         ]
 
     def _initialize_agent(self, verbose=False):
