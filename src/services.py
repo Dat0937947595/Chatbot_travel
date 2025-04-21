@@ -18,10 +18,11 @@ from langchain.prompts import PromptTemplate
 from langchain_community.utilities import GoogleSearchAPIWrapper
 from langchain_community.document_loaders import WebBaseLoader
 from pydantic import Field
-
+from typing import List, Optional, Literal, Dict
+from pydantic import BaseModel, Field
 
 # import prompt templates
-from prompts.query_history_prompt_template import query_history_prompt_template
+from prompts.query_history_prompt_template import query_history_prompt_template, missing_prompt_template
 from prompts.location_info_prompt_template import location_info_prompt
 from prompts.itinerary_planner_prompt_template import itinerary_planner_prompt_template
 from prompts.weather_info_prompt_template import extract_info_prompt, weather_response_prompt
@@ -84,28 +85,84 @@ def generate_response(chatbot, user_input, prompt_template_for_query):
 
     return final_rag_chain.invoke({"question": user_input})
 
+""" --------------------------------- """
 """Tinh chỉnh truy vấn, trả lời trực tiếp, hoặc hỏi lại nếu thiếu ngữ cảnh."""
+# =============================
+# Scheme truy vấn
+# =============================
+class TravelQuery(BaseModel):
+    location: List[str] = Field(description="Một hoặc nhiều tên địa điểm, địa danh cụ thể (ví dụ `hồ chí minh`). Nếu địa điểm không cụ thể rõ ràng thì để trống.")
+    intent: Literal[
+        "ask_places", "ask_weather", "ask_price", "plan_trip", "ask_accommodation", "ask_transportation", "ask_food"
+    ] = Field(description="Mục đích của câu hỏi người dùng.")
+    duration: Optional[str] = Field(default=None, description="Thời gian lưu trú, du lịch nếu có, ví dụ '3 ngày 2 đêm', 'trong tháng 6', 'mùa hè'.")
+    
+# ============================
+# Kiểm tra entity thiếu
+# ============================
+def check_missing_fields(entity: TravelQuery) -> List[str]:
+    missing = []
+    if not entity.location:
+        missing.append("location")
+    if not entity.intent:
+        missing.append("intent")
+
+    conditional_required_fields: Dict[str, List[str]] = {
+        "plan_trip": ["duration"],
+        "ask_accommodation": ["duration"]
+    }
+
+    for field in conditional_required_fields.get(entity.intent, []):
+        if not getattr(entity, field):
+            missing.append(field)
+    return missing
+
 def context_enhancer_function(chatbot, query):
     chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
-    query_history_chain = (
-        query_history_prompt_template
-        | chatbot.llm_gemini
-        | JsonOutputParser()
-    )
-    result = query_history_chain.invoke({"history": chat_history, "query": query})
+    # query_history_chain = (
+    #     query_history_prompt_template
+    #     | chatbot.llm_gemini
+    #     | JsonOutputParser()
+    # )
+    # result = query_history_chain.invoke({"history": chat_history, "query": query})
     
-    # Trường hợp trả lời trực tiếp
-    if "response" in result:
-        return result["response"]
-    # Trường hợp tinh chỉnh truy vấn
-    elif "refined_query" in result:
-        return result["refined_query"]
-    # Trường hợp hỏi lại
+    # # Trường hợp trả lời trực tiếp
+    # if "response" in result:
+    #     return result["response"]
+    # # Trường hợp tinh chỉnh truy vấn
+    # elif "refined_query" in result:
+    #     return result["refined_query"]
+    # # Trường hợp hỏi lại
+    # else:
+    #     missing_info = result.get("missing_info", "Vui lòng cung cấp thêm thông tin (địa điểm, thời gian, v.v.).")
+    #     return f"<Ask> {missing_info}"
+    
+    
+    chain = query_history_prompt_template | chatbot.llm_gemini | JsonOutputParser()
+    result = chain.invoke({
+        "query": query,
+        "history": chat_history,
+    })
+    
+    structured_llm = chatbot.llm_gemini.with_structured_output(TravelQuery)
+    parsed_entity = structured_llm.invoke(result["refined_query"])
+    logger.info(f"Parsed entity: {parsed_entity}")
+    
+    missing = check_missing_fields(parsed_entity)
+    logger.info(f"Missing fields: {missing}")
+    
+    if missing:
+        missing_chain = missing_prompt_template | chatbot.llm_gemini | StrOutputParser()
+        missing_response = missing_chain.invoke({
+            "query": query,
+            "missing_info": missing
+        })
+        
+        return f"<Ask> {missing_response}"
     else:
-        missing_info = result.get("missing_info", "Vui lòng cung cấp thêm thông tin (địa điểm, thời gian, v.v.).")
-        return f"<Ask> {missing_info}"
-    
-    
+        # Trả về câu hỏi đã được tinh chỉnh
+        return f"{result['refined_query']}"
+
 """ --------------------------------- """
 """Sinh phản hồi tự nhiên cho các câu chào hỏi hoặc giao tiếp xã giao bằng LLM Gemini."""
 def greetings_function(chatbot, user_input):
@@ -293,7 +350,7 @@ def weather_info_function(chatbot, query):
             "weather_data": json.dumps(data, ensure_ascii=False),  # Truyền toàn bộ JSON thô
             "current_date": current_date_str
         })
-        logger.info(f"Generated response: {response}")
+        # logger.info(f"Generated response: {response}")
         return response
     except Exception as e:
         logger.error(f"Error generating response: {str(e)}")
