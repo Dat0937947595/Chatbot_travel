@@ -86,7 +86,6 @@ def generate_response(chatbot, user_input, prompt_template_for_query):
     return final_rag_chain.invoke({"question": user_input})
 
 """ --------------------------------- """
-"""Tinh chỉnh truy vấn, trả lời trực tiếp, hoặc hỏi lại nếu thiếu ngữ cảnh."""
 # =============================
 # Scheme truy vấn
 # =============================
@@ -117,6 +116,7 @@ def check_missing_fields(entity: TravelQuery) -> List[str]:
             missing.append(field)
     return missing
 
+"""Tinh chỉnh truy vấn, trả lời trực tiếp, hoặc hỏi lại nếu thiếu ngữ cảnh."""
 def context_enhancer_function(chatbot, query):
     chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
     # query_history_chain = (
