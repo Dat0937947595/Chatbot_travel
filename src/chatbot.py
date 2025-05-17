@@ -70,7 +70,7 @@ class Chatbot:
             tools=self.tools,
             memory=self.memory,
             verbose=verbose,  #  Tùy chọn bật/tắt log chi tiết
-            handle_parsing_errors=False  # Tự động xử lý lỗi parsing
+            handle_parsing_errors=True  # Tự động xử lý lỗi parsing
         )
 
     def _initialize_tools(self):
@@ -88,7 +88,7 @@ class Chatbot:
                 ),
             
             Tool(
-                name="LocationAgent", 
+                name="LocalAgent", 
                 func=partial(location_info_function, self), 
                 description="Thông tin địa điểm từ cơ sở dữ liệu."
                 ),
@@ -105,21 +105,21 @@ class Chatbot:
                 description="Lập kế hoạch chuyến đi từ cơ sở dữ liệu."
                 ),
         
-            Tool(
-                name="PriceSearchAgent", 
-                func=partial(price_search_function, self), 
-                description="Thông tin giá các dịch vụ du lịch bằng Tavily."
-                ),
+            # Tool(
+            #     name="PriceSearchAgent", 
+            #     func=partial(price_search_function, self), 
+            #     description="Thông tin giá các dịch vụ du lịch bằng Tavily."
+            #     ),
             
             Tool(
-                name="TavilySearch", 
-                func=tavily_search, 
-                description="Tìm kiếm thông tin từ web bằng Tavily và trả về nội dung cùng đường link nguồn."),
+                name="SearchAgent", 
+                func=search_agent, 
+                description="Tìm kiếm các thông tin từ trang web"),
             
-            Tool(
-                name="GetTimeAgent", 
-                func=partial(get_time_function, self), 
-                description="Thông tin thời gian (ví dụ ngày hôm nay, giờ hiện tại, ...).")
+            # Tool(
+            #     name="GetTimeAgent", 
+            #     func=partial(get_time_function, self), 
+            #     description="Thông tin thời gian (ví dụ ngày hôm nay, giờ hiện tại, ...).")
         ]
 
     def _initialize_agent(self, verbose=False):

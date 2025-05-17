@@ -72,7 +72,7 @@ def generate_response(chatbot, user_input, prompt_template_for_query):
     )
 
     document_retrieval_chain = retrieval_chain_rag_fusion.invoke({"question": user_input})
-    logger.info(f"\nGọi RAG Fusion chain với câu truy vấn: {user_input}\n {document_retrieval_chain}\n")
+    # logger.info(f"\nGọi RAG Fusion chain với câu truy vấn: {user_input}\n {document_retrieval_chain}\n")
 
     formatted_prompt = RunnableLambda(lambda x: prompt_template_for_query.format(**x))
 
@@ -358,31 +358,44 @@ def weather_info_function(chatbot, query):
 
 
 """ --------------------------------- """
-# Hàm tìm kiếm với Tavily
-def tavily_search(query: str) -> str:
-    try:
-        results = tavily_client.search(query=query, search_depth="advanced", max_results=5)
-        if not results or "results" not in results:
-            return "Không tìm thấy kết quả phù hợp."
+from langchain_community.tools.tavily_search import TavilySearchResults
 
-        response = []
-        for item in results["results"]:
-            title = item.get("title", "Không có tiêu đề")
-            snippet = item.get("content", "Không có mô tả")
-            url = item.get("url", "Không có đường dẫn")
-            published_date = item.get("published_date", "Không rõ ngày xuất bản")
-            response.append(f"**{title}** (Ngày: {published_date})\n{snippet}\n[Xem chi tiết]({url})")
+# Khởi tạo tool
+tavily_tool = TavilySearchResults(
+    max_results=5,
+    include_answer=True,       # sẽ trả về câu trả lời/tóm tắt tự động
+    include_raw_content=False,  # kèm luôn nội dung thô
+    # include_images=True,       # nếu có ảnh, tool sẽ đưa vào kết quả
+    search_depth="advanced",
+)
+
+from langgraph.prebuilt import create_react_agent
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage
+llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+
+# Hàm tìm kiếm với Tavily
+def search_agent(query: str) -> str:
+    try:
+        content = tavily_tool.invoke({"query": query})
+        agent = create_react_agent(
+            model=llm,
+            tools=[tavily_tool],    
+        )
         
-        return "\n\n".join(response)
+        return agent.invoke({"message": [HumanMessage(query)]})
     except Exception as e:
         logger.error(f"Error with Tavily search: {str(e)}")
         return f"Lỗi khi tìm kiếm: {str(e)}"
+
+query = "Giá vé máy bay từ Hà Nội đi Đà Nẵng"
+print(search_agent(query))
 
 # Hàm tìm kiếm giá vé, dịch vụ du lịch
 def price_search_function(chatbot, query: str) -> str:
     # Thêm "mới nhất" để đảm bảo thông tin cập nhật
     search_query = f"{query} mới nhất"
-    search_results = tavily_search(search_query)
+    search_results = search_agent(search_query)
     
     response_chain = price_prompt | chatbot.llm_gemini | StrOutputParser()
     try:
