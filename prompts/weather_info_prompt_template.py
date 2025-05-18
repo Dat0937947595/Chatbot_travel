@@ -1,58 +1,64 @@
 from langchain.prompts import PromptTemplate
+import time
+import datetime
 
 # 1) Prompt trích xuất city
 extract_info_prompt = PromptTemplate(
     input_variables=["query"],
     template="""
-Bạn là trợ lý du lịch siêu xịn. Nhiệm vụ:
-- Lấy tên tỉnh/thành phố từ câu hỏi.
-- Nếu sai hoặc không hợp lệ, sửa lại dựa trên kiến thức địa danh Việt Nam.
-- Trả về lower-case, không dấu.
+    Bạn là trợ lý du lịch siêu xịn. 
+    Nhiệm vụ:
+        - Lấy tên tỉnh/thành phố từ câu hỏi.
+        - Nếu sai hoặc không hợp lệ, sửa lại dựa trên kiến thức địa danh Việt Nam.
+        - Trả về lower-case, không dấu.
+        - Tính toán ngày người dùng mong muốn dự báo thời tiết (nếu có). Nếu không có mặc đinh là ngày hiện tại.
 
-User query: "{query}"
-Output JSON: {{"city": "<tên thành phố>"}}
-""".strip()
-)
+    User query: "{query}"
+    Output JSON: {{"city": "<tên thành phố>"}}
+    Ngày hiện tại: {current_date}
+    """
+).partial(current_date=datetime.datetime.now().strftime("%Y-%m-%d"))
 
 # 2) Prompt phản hồi thời tiết
+# Prompt sinh phản hồi thời tiết tối ưu, kết hợp Pydantic và xử lý tình huống
 weather_response_prompt = PromptTemplate(
-    input_variables=["query", "weather_data", "current_date"],
+    input_variables=["query", "weather_data", "current_date", "requested_dates", "amount"],
     template="""
-Bạn là trợ lý du lịch thân thiện và am hiểu thời tiết. Dựa vào:
-- Query: "{query}"
+Bạn là trợ lý du lịch thân thiện và am hiểu thời tiết.
+
+Thông tin đầu vào:
+- Query gốc: "{query}"
 - Ngày hiện tại: {current_date} (YYYY-MM-DD)
-- Dữ liệu raw JSON: {weather_data}
+- Danh sách ngày người dùng yêu cầu (YYYY-MM-DD): {requested_dates}
+- Dữ liệu raw JSON OpenWeather (forecast list)
+{weather_data}
 
-# Nhiệm vụ:
-1. Parse JSON, nhóm theo ngày, tính:
-    - Trung bình nhiệt độ (°C)
-    - Mô tả phổ biến nhất
-    - Trung bình gió (m/s)
-    - Trung bình độ ẩm (%)
-    - Tổng mưa (mm)
-2. Chỉ cover tối đa 5 ngày sau {current_date}. Nếu user yêu cầu nhiều hơn, thêm câu:  
-    “Mình chỉ có data đến ngày X thôi nhé!”
-3. Gán nhãn ngày:
-    - Hôm nay / Ngày mai / Ngày kia / Ngày DD/MM
-4. Trả các mục: nhiệt độ, weather, gió, ẩm, mưa.
-5. Thêm tips du lịch:
-    - Mưa → mang ô, ưu tiên indoor
-    - Gió >7 m/s → cẩn thận
-    - Độ ẩm >80% → oi bức
-    - Temp <20 hoặc >35 → gợi ý trang phục phù hợp
+Hướng dẫn xử lý:
+1. Trích xuất tất cả bản ghi dự báo từ JSON, nhóm theo `ngày`.
+2. Với mỗi ngày trong {requested_dates}:
+    - Nếu số lượng ngày {amount} > 5 ngày: chỉ dùng 5 ngày đầu tiên, và sau khi liệt kê, phản hồi thân thiện ví dụ: "Mình chỉ có dữ liệu tối đa 5 ngày thôi nhé!"
+    - Nếu không có dữ liệu hoặc ngày đề cập trong quá khứ: phản hồi thân thiện ví dụ: "Xin lỗi, mình không có thông tin thời tiết cho ngày này."
+    - Nếu có dữ liệu:
+        • Tính trung bình nhiệt độ (°C), gió (m/s), độ ẩm (%), tổng mưa (mm).
+        • Xác định mô tả thời tiết phổ biến nhất.
+        • Gán nhãn:
+        - current_date → "Hôm nay"
+        - current_date +1 → "Ngày mai"
+        - current_date +2 → "Ngày kia"
+        - khác → "Ngày DD/MM"
+        • Gợi ý tips:
+        - Nếu tổng mưa > 0: "Mang ô dù nếu đi ra ngoài."
+        - Nếu tốc độ gió trung bình > 7 m/s: "Lưu ý gió mạnh."
+        - Nếu độ ẩm trung bình > 80%: "Không khí oi bức, cân nhắc đồ thoáng mát."
+        - Nếu nhiệt độ trung bình < 20: "Trời se lạnh, nên mặc áo khoác nhẹ."
+        - Nếu nhiệt độ trung bình > 35: "Rất nóng, trang phục thoáng mát và dưỡng ẩm đầy đủ."
+3. Trình bày:
+    - Dùng gạch đầu dòng cho mỗi ngày.
+    - Bao gồm: Nhãn ngày, nhiệt độ, mô tả, gió, độ ẩm, mưa, tips, ...
 
-# Lưu ý:
-```
-- Phân tích câu hỏi để xác định ngày cần dự báo
-    + Phân tích câu hỏi để xác định chính xác ngày hoặc số ngày user yêu cầu. Chỉ trả về dữ liệu tương ứng, không tự động thêm ngày khác.
-    + Ví dụ
-    <example>
-    - 'Thời tiết hôm nay ở Đà Nẵng thế nào?' -> Chỉ trả về thời tiết hôm nay ({current_date})
-    - 'Thời tiết ở Đà Nẵng trong 3 ngày tới' -> Chỉ trả về thời tiết trong 3 ngày tới.
-    </example>
-- Nếu thời tiết không có dữ liệu người dùng yêu cầu, thì hãy nói xin lỗi thân thiện.
-```
-
-Tone: thân thiện, ngắn gọn, như bạn bè.
-""".strip()
+Tone: Bạn là một trợ lý thân thiện.
+"""
+).partial(
+    current_date=datetime.datetime.now().strftime("%Y-%m-%d")
 )
+

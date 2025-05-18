@@ -14,7 +14,7 @@ from tavily import TavilyClient
 # Import các thư viện từ LangChain và các thư viện khác
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain.schema.runnable import RunnableLambda
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_community.utilities import GoogleSearchAPIWrapper
 from langchain_community.document_loaders import WebBaseLoader
 from pydantic import Field
@@ -22,7 +22,7 @@ from typing import List, Optional, Literal, Dict
 from pydantic import BaseModel, Field
 
 # import prompt templates
-from prompts.query_history_prompt_template import query_history_prompt_template, missing_prompt_template
+from prompts.query_history_prompt_template import query_history_prompt_template
 from prompts.location_info_prompt_template import location_info_prompt
 from prompts.itinerary_planner_prompt_template import itinerary_planner_prompt_template
 from prompts.weather_info_prompt_template import extract_info_prompt, weather_response_prompt
@@ -72,7 +72,7 @@ def generate_response(chatbot, user_input, prompt_template_for_query):
     )
 
     document_retrieval_chain = retrieval_chain_rag_fusion.invoke({"question": user_input})
-    logger.info(f"\nGọi RAG Fusion chain với câu truy vấn: {user_input}\n {document_retrieval_chain}\n")
+    # logger.info(f"\nGọi RAG Fusion chain với câu truy vấn: {user_input}\n {document_retrieval_chain}\n")
 
     formatted_prompt = RunnableLambda(lambda x: prompt_template_for_query.format(**x))
 
@@ -85,129 +85,154 @@ def generate_response(chatbot, user_input, prompt_template_for_query):
 
     return final_rag_chain.invoke({"question": user_input})
 
-""" --------------------------------- """
-# =============================
-# Scheme truy vấn
-# =============================
-class TravelQuery(BaseModel):
-    location: List[str] = Field(description="Một hoặc nhiều tên địa điểm, địa danh cụ thể (ví dụ `hồ chí minh`). Nếu địa điểm không cụ thể rõ ràng thì để trống.")
-    intent: Literal[
-        "ask_places", "ask_weather", "ask_price", "plan_trip", "ask_accommodation", "ask_transportation", "ask_food"
-    ] = Field(description="Mục đích của câu hỏi người dùng.")
-    duration: Optional[str] = Field(default=None, description="Thời gian lưu trú, du lịch nếu có, ví dụ '3 ngày 2 đêm', 'trong tháng 6', 'mùa hè'.")
-    
-# ============================
-# Kiểm tra entity thiếu
-# ============================
-def check_missing_fields(entity: TravelQuery) -> List[str]:
-    missing = []
-    if not entity.location:
-        missing.append("location")
-    if not entity.intent:
-        missing.append("intent")
+""" -------------------------------------------------------------- """
+"""     Tăng cường cho câu hỏi người dùng."""
+from typing import Optional, List
+from pydantic import BaseModel, Field
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.tools import BaseTool
+from langchain.prompts import PromptTemplate
+from langchain import hub
+from langchain.agents import create_react_agent, AgentExecutor
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.tools.base import ArgsSchema
 
-    conditional_required_fields: Dict[str, List[str]] = {
-        "plan_trip": ["duration"],
-        "ask_accommodation": ["duration"]
-    }
+# Khởi tạo LLM
+llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
 
-    for field in conditional_required_fields.get(entity.intent, []):
-        if not getattr(entity, field):
-            missing.append(field)
-    return missing
+""" ----------------------------------------------------- """
+"""      Tăng cường ngữ cảnh cho câu hỏi."""
+## Viết lại truy vấn
+def rewrite_query(llm, query, history):
+    chain = query_history_prompt_template | llm | JsonOutputParser()
+    return chain.invoke({"query": query, "history": history})
 
-"""Tinh chỉnh truy vấn, trả lời trực tiếp, hoặc hỏi lại nếu thiếu ngữ cảnh."""
-def context_enhancer_function(chatbot, query):
-    chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
-    # query_history_chain = (
-    #     query_history_prompt_template
-    #     | chatbot.llm_gemini
-    #     | JsonOutputParser()
-    # )
-    # result = query_history_chain.invoke({"history": chat_history, "query": query})
+""" ----------------------------------------------------- """
+"""      Kiểm tra tính liên quan của câu hỏi."""
+## Định nghĩa model cho việc trích xuất thông tin du lịch
+class TravelInfoExtraction(BaseModel):
+    is_clear: Optional[bool] = Field(
+        None,
+        description="True nếu câu hỏi đã rõ ràng không cần hỏi thêm thông tin, False nếu cần hỏi thêm thông tin."
+    )
+    missing_info: Optional[str] = Field(
+        None,
+        description="Thông tin còn thiếu trong câu hỏi để hỏi lại người dùng giúp câu hỏi rõ ràng hơn. Tránh nhập nhằng về ngữ nghĩa."
+    )
     
-    # # Trường hợp trả lời trực tiếp
-    # if "response" in result:
-    #     return result["response"]
-    # # Trường hợp tinh chỉnh truy vấn
-    # elif "refined_query" in result:
-    #     return result["refined_query"]
-    # # Trường hợp hỏi lại
-    # else:
-    #     missing_info = result.get("missing_info", "Vui lòng cung cấp thêm thông tin (địa điểm, thời gian, v.v.).")
-    #     return f"<Ask> {missing_info}"
+## Công cụ: Trích xuất thông tin du lịch
+def ExtractTravelInfoTool(llm, query):
+    prompt = PromptTemplate(
+        template="""
+        Bạn là chuyên gia phân tích câu truy vấn du lịch. Nhiệm vụ của bạn là phân tích câu hỏi và xác định xem câu hỏi có rõ ràng hay không, có có cần hỏi thêm thông tin hay không.
+        Truy vấn: {query}
+        Nếu không đề cập tới thời gian, mặc định ngày hiện tại.
+        Thời gian hiện tại: {current_time}
+        """,
+        input_variables=["query"]
+    ).partial(current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    chain = prompt | llm.with_structured_output(TravelInfoExtraction)
+    return chain.invoke({"query": query})
+
+# Công cụ: Hỏi thông tin còn thiếu
+def AskMissingInfoTool(llm, query, missing_info):
+    prompt = PromptTemplate(
+        template="""
+        Người dùng đã hỏi: {query}
+        Các thông tin còn thiếu là: {missing_info}
+        Hãy đặt một câu hỏi lịch sự và rõ ràng để yêu cầu người dùng cung cấp các thông tin đó.
+        """,
+        input_variables=["query", "missing_info"]
+    )
+    chain = prompt | llm | StrOutputParser()
+    return chain.invoke({"query": query, "missing_info": missing_info})
+
+# Hàm kiểm tra và xác thực truy vấn
+def validate_query(llm, query: str, history: List) -> str:
+    # Trích xuất thông tin du lịch
+    travel_info = ExtractTravelInfoTool(llm, query)
+    logger.info(f"\nKết quả từ ExtractTravelInfoTool: {travel_info}\n")
     
+    # Nếu cần hỏi thêm thông tin, gọi hàm AskMissingInfoTool
+    if not travel_info.is_clear:
+        ask_missing_info = AskMissingInfoTool(llm, query, travel_info.missing_info)
+        return {'ask_human': True, 'result': ask_missing_info}
     
-    chain = query_history_prompt_template | chatbot.llm_gemini | JsonOutputParser()
-    result = chain.invoke({
-        "query": query,
-        "history": chat_history,
-    })
-    
-    structured_llm = chatbot.llm_gemini.with_structured_output(TravelQuery)
-    parsed_entity = structured_llm.invoke(result["refined_query"])
-    logger.info(f"Parsed entity: {parsed_entity}")
-    
-    missing = check_missing_fields(parsed_entity)
-    logger.info(f"Missing fields: {missing}")
-    
-    if missing:
-        missing_chain = missing_prompt_template | chatbot.llm_gemini | StrOutputParser()
-        missing_response = missing_chain.invoke({
-            "query": query,
-            "missing_info": missing
-        })
+    return {'ask_human': False, 'result': query}
+
+# print(enhance_context(llm, "các món ăn nổi tiếng ở HCM", [])['ask_human'])
+
+""" ----------------------------------------------- """
+"""    Xử lý câu hỏi không liên quan hoặc chào hỏi."""
+from typing import Literal, Optional, Dict
+from pydantic import BaseModel, Field
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+# llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+
+from pydantic import BaseModel, Field
+from typing import Optional
+from langchain import PromptTemplate
+
+class Relevant(BaseModel):
+    is_relevant: bool = Field(
+        description="True nếu câu hỏi liên quan trực tiếp đến du lịch (lên kế hoạch, điểm đến, phương tiện, ăn uống khi đi du lịch, lưu trú, visa, kinh nghiệm, tra cứu thời tiết, v.v.), "
+                    "ngược lại False."
+    )
+    reason: Optional[str] = Field(
+        description="Nếu is_relevant=False, giải thích ngắn gọn lý do tại sao không liên quan."
+    )
+    response: Optional[str] = Field(
+        description="Nếu is_relevant=False, phản hồi thân thiện hướng người dùng quay lại chủ đề du lịch."
+    )
+
+def relevant_travel(llm_gemini, query):
+    relevant_prompt_template = PromptTemplate(
+        input_variables=["query"],
+        template="""
+        Bạn là một trợ lý du lịch chuyên nghiệp, thân thiện. Nhiệm vụ của bạn là xác định xem câu hỏi của người dùng có thật sự liên quan đến du lịch hay không.
+
+        - Định nghĩa "liên quan đến du lịch":
+            + Lên kế hoạch chuyến đi: điểm đến, lịch trình, thời gian, ngân sách.  
+            + Vận chuyển: máy bay, tàu, xe buýt, ô tô tự lái.  
+            + Lưu trú: khách sạn, homestay, resort, thuê nhà dài/ngắn hạn.  
+            + Ăn uống khi đi du lịch: món đặc sản, nhà hàng, quán địa phương nhưng trong bối cảnh “nên ăn khi du lịch tại…”.  
+            + Thủ tục: visa, hải quan, bảo hiểm du lịch.  
+            + Hoạt động, trải nghiệm: tham quan, tour, hướng dẫn viên, văn hoá, sự kiện.  
+            + Thời tiết: tra cứu thông tin về thời tiết một ngày bất kì, ...
         
-        return f"<Ask> {missing_response}"
-    else:
-        # Trả về câu hỏi đã được tinh chỉnh
-        return f"{result['refined_query']}"
+        - Không tính là liên quan:  
+            + Chào hỏi xã giao ('Chào em!', 'Hôm nay thế nào?').  
+            + Hỏi-đáp về lập trình, khoa học, thể thao…  
 
-""" --------------------------------- """
-"""Sinh phản hồi tự nhiên cho các câu chào hỏi hoặc giao tiếp xã giao bằng LLM Gemini."""
-def greetings_function(chatbot, user_input):
-    # Tạo prompt dưới dạng PromptTemplate
-    greeting_prompt_template = PromptTemplate(
-        input_variables=["chat_history", "question"],
-        template="""
-        Bạn là một trợ lý thân thiện. Hãy trả lời câu chào hỏi hoặc giao tiếp xã giao từ người dùng một cách tự nhiên, lịch sự dựa trên câu hỏi và ngữ cảnh lịch sử hội thoại.
-        Lịch sử hội thoại: {chat_history}
-        Câu hỏi: {question}
-        Trả về phản hồi ngắn gọn, thân thiện.
-        """
-    )
-    
-    # Tạo chain: PromptTemplate -> LLM Gemini -> string output
-    greeting_chain = (
-        greeting_prompt_template
-        | chatbot.llm_gemini
-        | StrOutputParser()
-    )
-    
-    # Lấy lịch sử hội thoại từ memory
-    chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
-    
-    # Gọi chain với input là dict chứa chat_history và question",
-    response = greeting_chain.invoke({"chat_history": chat_history, "question": user_input})
-    return response
+        Dưới đây là ví dụ:
+        <examples>
+        1. Câu hỏi: "Các món ăn nổi tiếng tại Đà Nẵng"  
+        → is_relevant: true  
+        (vì hỏi “ăn uống” trong bối cảnh địa điểm du lịch)  
+
+        2. Câu hỏi: "Công thức làm phở bò"  
+        → is_relevant: false  
+        reason: "Hỏi chung về nấu ăn, không đặt trong bối cảnh du lịch"  
+        response: "Mình chuyên hỗ trợ về du lịch, bạn có muốn tìm hiểu địa điểm ẩm thực khi đi du lịch không?"  
+
+        3. Câu hỏi: "Chào bạn, bạn khỏe không?"  
+        → is_relevant: false  
+        reason: "Chào hỏi xã giao, không liên quan du lịch, phản hồi lại nhẹ nhàng"  
+        response: "Chào bạn! Mình là trợ lý du lịch, bạn có thắc mắc gì về chuyến đi không?"  
+        </examples>
+
+        User question: "{query}"
+
+        Hãy chỉ trả về JSON hợp lệ theo schema Pydantic `Relevant`, không thêm text nào khác.
+        """ 
+        )
+    chain = relevant_prompt_template | llm_gemini.with_structured_output(Relevant)
+    return chain.invoke({"query": query})
 
 
-""" --------------------------------- """
-"""Xử lý câu hỏi không liên quan hoặc chào hỏi."""
-def not_relevant_function(chatbot, query):
-    not_relevant_prompt_template = PromptTemplate(
-        input_variables=["chat_history", "query"],
-        template="""
-        Bạn là một trợ lý du lịch thân thiện. Nếu câu hỏi không liên quan đến du lịch, từ chối nhẹ nhàng và gợi ý hỏi về du lịch. Nếu là chào hỏi, trả lời tự nhiên.
-        Lịch sử trò chuyện: {chat_history}
-        Câu hỏi: {query}
-        Trả về phản hồi ngắn gọn, thân thiện.
-        """
-    )
-    chain = not_relevant_prompt_template | chatbot.llm_gemini | StrOutputParser()
-    chat_history = chatbot.memory.load_memory_variables({})["chat_history"]
-    return chain.invoke({"chat_history": chat_history, "query": query})
-
+# res = not_relevant_function("Cho tôi thông tin về ronaldo")
+# print(res)  # Chào bạn, hôm nay trời đẹp nhỉ?
 
 """ --------------------------------- """
 """Xử lý các câu hỏi liên quan đến địa điểm, thông tin địa điểm."""
@@ -240,10 +265,10 @@ def itinerary_planner_function(chatbot, query):
     try:
         extracted_info = extract_chain.invoke({"query": query})
     except Exception as e:
-        return "<Ask> Vui lòng cung cấp thông tin rõ ràng hơn (địa điểm, thời gian, sở thích)."
+        return "Vui lòng cung cấp thông tin rõ ràng hơn (địa điểm, thời gian, sở thích)."
 
     if not extracted_info.get("destination") or not extracted_info.get("duration"):
-        return "<Ask> Bạn muốn đi đâu và trong bao lâu?"
+        return "Bạn muốn đi đâu và trong bao lâu?"
 
     destination = extracted_info["destination"]
     duration = extracted_info["duration"]
@@ -304,24 +329,36 @@ def get_time_function(chatbot, query):
     return response
 
 
-""" --------------------------------- """
-"""Hàm tra cứu và sinh phản hồi thời tiết chi tiết cho chatbot du lịch."""
+""" ---------------------------------------------------------------------------"""
+"""     Hàm tra cứu và sinh phản hồi thời tiết chi tiết cho chatbot du lịch."""
+class ExtractInFoTool(BaseModel):
+    city: Optional[str] = Field(
+        None,
+        description="Tên thành phố cần tra cứu thời tiết. Lưu ý viết thường không dấu."
+    )
+    date: List[str] = Field(
+        description="Các ngày cần tra cứu thời tiết. Nếu không có, mặc định là ngày hiện tại."
+    )
+    
+    amount: int = Field(
+        default=1,
+        description="Số lượng ngày cần tra cứu thời tiết. Mặc định là 1."
+    )
+
 # Hàm tra cứu và sinh phản hồi thời tiết
 def weather_info_function(chatbot, query):
     BASE_URL = "http://api.openweathermap.org/data/2.5/forecast"
 
     # Chain trích xuất
-    extract_chain = extract_info_prompt | chatbot.llm_gemini | JsonOutputParser()
+    extract_chain = extract_info_prompt | chatbot.llm_gemini.with_structured_output(ExtractInFoTool)
     try:
         extract_result = extract_chain.invoke({"query": query})
         logger.info(f"Extracted result: {extract_result}")
     except Exception as e:
         logger.error(f"Error extracting info: {str(e)}")
-        return "<Ask> Tôi không hiểu yêu cầu của bạn. Vui lòng thử lại."
+        return "Tôi không hiểu yêu cầu của bạn. Vui lòng thử lại."
 
-    city = extract_result.get("city")
-    # current_date = time.strftime("%Y-%m-%d", time.localtime())
-    current_date_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    city = extract_result.city
 
     # Gọi API OpenWeatherMap
     try:
@@ -336,11 +373,11 @@ def weather_info_function(chatbot, query):
 
         if data.get("cod") != "200":
             logger.warning(f"API error: {data.get('message')}")
-            return "<Ask> Không tìm thấy thông tin thời tiết cho thành phố này."
+            return "Không tìm thấy thông tin thời tiết cho thành phố này."
 
     except Exception as e:
         logger.error(f"Error fetching weather data: {str(e)}")
-        return f"<Ask> Lỗi khi tra cứu thời tiết: {str(e)}. Vui lòng thử lại."
+        return f"Lỗi khi tra cứu thời tiết: {str(e)}. Vui lòng thử lại."
 
     # Chain sinh phản hồi (truyền JSON thô)
     response_chain = weather_response_prompt | chatbot.llm_gemini | StrOutputParser()
@@ -348,49 +385,59 @@ def weather_info_function(chatbot, query):
         response = response_chain.invoke({
             "query": query,
             "weather_data": json.dumps(data, ensure_ascii=False),  # Truyền toàn bộ JSON thô
-            "current_date": current_date_str
+            "requested_dates": extract_result.date,
+            "amount": extract_result.amount,    
         })
-        # logger.info(f"Generated response: {response}")
         return response
     except Exception as e:
         logger.error(f"Error generating response: {str(e)}")
-        return f"<Ask> Lỗi khi xử lý dữ liệu thời tiết: {str(e)}. Vui lòng thử lại."
+        return f"Lỗi khi xử lý dữ liệu thời tiết: {str(e)}. Vui lòng thử lại."
 
+""" ------------------------------------------------------------ """
+"""             Hàm tìm kiếm thông tin từ Tavily.           """
+from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage
+from langchain.agents import AgentExecutor, create_react_agent
+from langchain import hub
 
-""" --------------------------------- """
+# Khởi tạo tool
+tavily_tool = TavilySearchResults(
+    max_results=3,
+    include_answer=True,       # sẽ trả về câu trả lời/tóm tắt tự động
+    include_raw_content=True,  # kèm luôn nội dung thô
+    # include_images=True,       # nếu có ảnh, tool sẽ đưa vào kết quả
+    search_depth="advanced",
+)
+prompt = PromptTemplate.from_template(
+    """
+    Trả lời các câu hỏi sau đây một cách tốt nhất có thể. Bạn có quyền truy cập vào các công cụ sau:
+    {tools}
+    Sử dụng định dạng sau:
+    Question: câu hỏi đầu vào mà bạn phải trả lời
+    Thought: bạn nên luôn suy nghĩ về việc cần làm gì
+    Action: hành động cần thực hiện, nên là một trong số [{tool_names}]
+    Action Input: đầu vào cho hành động
+    Observation: kết quả của hành động
+    ... (quy trình Thought/Action/Action Input/Observation này có thể lặp lại N lần)
+    Thought: Bây giờ tôi đã biết câu trả lời cuối cùng
+    Final Answer: câu trả lời cuối cùng cho câu hỏi đầu vào ban đầu. Câu trả lời thân thiện và tự nhiên.
+    Begin!
+    Question: {input}
+    Thought:{agent_scratchpad}
+    """
+)
+
 # Hàm tìm kiếm với Tavily
-def tavily_search(query: str) -> str:
+def search_agent(chatbot, query: str) -> str:
     try:
-        results = tavily_client.search(query=query, search_depth="advanced", max_results=5)
-        if not results or "results" not in results:
-            return "Không tìm thấy kết quả phù hợp."
-
-        response = []
-        for item in results["results"]:
-            title = item.get("title", "Không có tiêu đề")
-            snippet = item.get("content", "Không có mô tả")
-            url = item.get("url", "Không có đường dẫn")
-            published_date = item.get("published_date", "Không rõ ngày xuất bản")
-            response.append(f"**{title}** (Ngày: {published_date})\n{snippet}\n[Xem chi tiết]({url})")
-        
-        return "\n\n".join(response)
+        agent = create_react_agent(
+            llm=chatbot.llm_gemini,
+            tools=[tavily_tool],    
+            prompt = prompt
+        )
+        agent_executor = AgentExecutor(agent=agent, tools=[tavily_tool], verbose=True) 
+        return agent_executor.invoke({"input": query})
     except Exception as e:
         logger.error(f"Error with Tavily search: {str(e)}")
         return f"Lỗi khi tìm kiếm: {str(e)}"
-
-# Hàm tìm kiếm giá vé, dịch vụ du lịch
-def price_search_function(chatbot, query: str) -> str:
-    # Thêm "mới nhất" để đảm bảo thông tin cập nhật
-    search_query = f"{query} mới nhất"
-    search_results = tavily_search(search_query)
-    
-    response_chain = price_prompt | chatbot.llm_gemini | StrOutputParser()
-    try:
-        response = response_chain.invoke({
-            "query": query,
-            "search_results": search_results
-        })
-        return response
-    except Exception as e:
-        logger.error(f"Error generating price response: {str(e)}")
-        return f"Không thể tìm thông tin giá chính xác cho '{query}'. Bạn có thể thử lại hoặc kiểm tra trực tiếp qua các trang web du lịch."
