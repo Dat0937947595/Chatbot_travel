@@ -16,6 +16,7 @@ from langchain.tools import Tool
 from langchain.agents import AgentExecutor, create_react_agent
 from langchain.chains import LLMChain
 from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.messages import HumanMessage, AIMessage
 
 # Import nội bộ project
 from config.config import VECTORSTORE_DIR  # Giả sử bạn đã định nghĩa các hằng số trong config
@@ -41,9 +42,8 @@ class Chatbot:
         self.model = Model()
         self.llm_gemini = self.model.get_llm_gemini()
         self.embedding_model = self.model.get_embedding()
-        self.date_time = ""
+        
         # Lịch sử hội thoại và truy vấn
-        self.query = ""
         self.memory = ConversationBufferMemory(
             memory_key="chat_history",
             return_messages=True
@@ -74,19 +74,7 @@ class Chatbot:
         )
 
     def _initialize_tools(self):
-        return [
-            Tool(
-                name="ContextEnhancerAgent", 
-                func=partial(context_enhancer_function, self), 
-                description="Tinh chỉnh truy vấn hoặc hỏi lại nếu thiếu ngữ cảnh."
-                ),
-            
-            Tool(
-                name="NotRelevantAgent", 
-                func=partial(not_relevant_function, self),
-                description="Xử lý câu hỏi không liên quan hoặc chào hỏi."
-                ),
-            
+        return [       
             Tool(
                 name="LocalAgent", 
                 func=partial(location_info_function, self), 
@@ -100,26 +88,16 @@ class Chatbot:
                 ),
             
             Tool(
+                name="SearchAgent", 
+                func=partial(search_agent, self), 
+                description="Tìm kiếm các thông tin từ trang web."),
+            
+            Tool(
                 name="PlanAgent", 
                 func=partial(itinerary_planner_function, self), 
                 description="Lập kế hoạch chuyến đi từ cơ sở dữ liệu."
                 ),
-        
-            # Tool(
-            #     name="PriceSearchAgent", 
-            #     func=partial(price_search_function, self), 
-            #     description="Thông tin giá các dịch vụ du lịch bằng Tavily."
-            #     ),
             
-            Tool(
-                name="SearchAgent", 
-                func=search_agent, 
-                description="Tìm kiếm các thông tin từ trang web"),
-            
-            # Tool(
-            #     name="GetTimeAgent", 
-            #     func=partial(get_time_function, self), 
-            #     description="Thông tin thời gian (ví dụ ngày hôm nay, giờ hiện tại, ...).")
         ]
 
     def _initialize_agent(self, verbose=False):
@@ -129,22 +107,43 @@ class Chatbot:
             tools=self.tools,
             prompt=main_prompt_template
         )
-
-    def get_query(self, query):
-        """Lưu trữ truy vấn người dùng."""
-        self.query = query
-
-    def get_date_time(self, date_time):
-        self.date_time = date_time
-
-    def print_date_time(self):
-        return self.date_time
+        
+    def _return_history(self):
+        """Trả về lịch sử hội thoại."""
+        chat_history = self.memory.load_memory_variables({})["chat_history"]
+        return chat_history
 
     def chat(self, user_input):
         """Xử lý đầu vào người dùng và trả về phản hồi."""
         try:
-            self.get_query(user_input)
             logger.info(f"Processing user input: {user_input}")
+            logger.info(f"History: {self._return_history()}")
+            
+            # Viết lại truy vấn nếu cần
+            rewrite = rewrite_query(self.llm_gemini, user_input, self._return_history())
+            logger.info(f"Rewritten query: {rewrite}")
+            
+            # Kiểm tra tính liên quan của câu hỏi
+            relevantchecker = relevant_travel(self.llm_gemini, rewrite['refined_query'])
+            logger.info(f"Relevant checker is_relevant: {relevantchecker.is_relevant}")
+            logger.info(f"Relevant checker reason: {relevantchecker.reason}")
+            
+            # Nếu câu hỏi không liên quan, trả về phản hồi
+            if not relevantchecker.is_relevant:
+                # Nếu câu hỏi không liên quan, trả về phản hồi
+                return relevantchecker.response
+
+            # Nếu câu hỏi liên quan, kiểm tra lại truy vấn
+            query_checker = validate_query(self.llm_gemini, rewrite['refined_query'], self._return_history())
+            logger.info(f"Query checker result: {query_checker['result']}")
+            
+            # Nếu cần hỏi người dùng, lưu lại ngữ cảnh
+            if query_checker['ask_human']:
+                self.memory.save_context(
+                    {"inputs": rewrite['refined_query']},
+                    {"outputs": query_checker['result']}
+                )
+                return query_checker['result']
 
             # Gọi agent để xử lý truy vấn
             response = self.executor.invoke({"input": user_input})

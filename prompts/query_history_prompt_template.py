@@ -1,15 +1,25 @@
 from langchain.prompts import PromptTemplate
 import logging
+import datetime
+import time
 
 # Logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Query History Prompt")
 
 query_history_prompt = """
-Bạn là một trợ lý du lịch thông minh, xử lý truy vấn dựa trên lịch sử hội thoại. Lịch sử là danh sách các lượt hội thoại: [{{"role": "user" hoặc "assistant", "content": "nội dung"}}]. Nhiệm vụ: Phân tích lịch sử, tinh chỉnh truy vấn nếu cần để tạo câu hỏi hoàn chỉnh.
+Bạn là một trợ lý du lịch thông minh, xử lý truy vấn dựa trên lịch sử hội thoại. Lịch sử là danh sách các lượt hội thoại. 
+
+Nhiệm vụ: Phân tích lịch sử, tinh chỉnh truy vấn nếu cần để tạo câu hỏi hoàn chỉnh phục vụ cho việc tìm kiếm thông tin, trả lời câu hỏi dễ dàng hơn.
+
+Lưu ý: Câu hỏi được viết lại thành một câu hỏi hoàn chỉnh, rõ ràng và dễ hiểu hơn.
+
+---  
+Định nghĩa “câu hỏi hoàn chỉnh”:  
+- Đưa vào thông tin ngữ cảnh quan trọng từ lịch sử (địa điểm, thời gian, mục đích, đối tượng…)  
+- Viết thành câu hỏi đầy đủ, không thiếu ngữ pháp, rõ ràng. 
 
 ---
-
 ### Hướng dẫn
 1. **Phân tích**:
    - Xem `{history}` để tìm ngữ cảnh liên quan đến `{query}`.
@@ -24,7 +34,7 @@ Bạn là một trợ lý du lịch thông minh, xử lý truy vấn dựa trên
 ### Đầu vào
 - **Lịch sử hội thoại**: {history}
 - **Truy vấn**: {query}
-
+- **Thời gian hiện tại:** {current_time} từ thời gian hiện tại bạn có thể tự suy ra thời gian của ngày hôm qua, tuần trước, tháng trước, năm trước, ... để đưa vào câu hỏi hoàn chỉnh.
 ---
 
 ### Ví dụ
@@ -42,32 +52,16 @@ Bạn là một trợ lý du lịch thông minh, xử lý truy vấn dựa trên
 
 ---
 
-### Đầu ra cuối cùng
-Trả về JSON: `{{"refined_query": "câu hỏi hoàn chỉnh"}}`.
+### Đầu ra cuối cùng:
+Trả về JSON: 
+```json
+{{"refined_query": "câu hỏi hoàn chỉnh"}}
+```.
 """
 
 query_history_prompt_template = PromptTemplate(
-   input_variables=["query", "history"],
+   input_variables=["query", "history", "current_time"],
    template=query_history_prompt
-)
-
-# Viết prompt viết câu hỏi hỏi người dùng thông tin còn thiếu:
-missing_prompt = """
-Bạn là một trợ lý du lịch thông minh. Nhiệm vụ của bạn là giúp người dùng hoàn thiện truy vấn du lịch bằng cách hỏi lại những thông tin còn thiếu.
-
----
-# Đầu vào:
-- Truy vấn của người dùng: {query}
-- Các thông tin còn thiếu: {missing_info}
-
----
-# Đầu ra:
-Viết một câu hỏi tự nhiên và rõ ràng để yêu cầu người dùng cung cấp thông tin còn thiếu, sao cho truy vấn có thể được xử lý chính xác nhất.
-
-Câu hỏi:
-"""
-
-missing_prompt_template = PromptTemplate(
-   input_variables=["query", "missing_info"],
-   template=missing_prompt
+).partial(
+   current_time=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 )
