@@ -83,7 +83,7 @@ class Chatbot:
             
             Tool(
                 name="WeatherAgent", 
-                func=partial(weather_info_function, self), 
+                func=partial(agent_weather, self), 
                 description="Thông tin liên quan đến thời tiết."
                 ),
             
@@ -92,11 +92,11 @@ class Chatbot:
                 func=partial(search_agent, self), 
                 description="Tìm kiếm các thông tin từ trang web."),
             
-            Tool(
-                name="PlanAgent", 
-                func=partial(itinerary_planner_function, self), 
-                description="Lập kế hoạch chuyến đi từ cơ sở dữ liệu."
-                ),
+            # Tool(
+            #     name="PlanAgent", 
+            #     func=partial(itinerary_planner_function, self), 
+            #     description="Lập kế hoạch chuyến đi từ cơ sở dữ liệu."
+            #     ),
             
         ]
 
@@ -127,6 +127,7 @@ class Chatbot:
             relevantchecker = relevant_travel(self.llm_gemini, rewrite['refined_query'])
             logger.info(f"Relevant checker is_relevant: {relevantchecker.is_relevant}")
             logger.info(f"Relevant checker reason: {relevantchecker.reason}")
+            logger.info(f"Relevant checker response: {relevantchecker.response}")
             
             # Nếu câu hỏi không liên quan, trả về phản hồi
             if not relevantchecker.is_relevant:

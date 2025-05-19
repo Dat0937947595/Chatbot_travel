@@ -36,7 +36,7 @@ Thông tin đầu vào:
 Hướng dẫn xử lý:
 1. Trích xuất tất cả bản ghi dự báo từ JSON, nhóm theo `ngày`.
 2. Với mỗi ngày trong {requested_dates}:
-    - Nếu số lượng ngày {amount} > 5 ngày: chỉ dùng 5 ngày đầu tiên, và sau khi liệt kê, phản hồi thân thiện ví dụ: "Mình chỉ có dữ liệu tối đa 5 ngày thôi nhé!"
+    - Nếu số lượng ngày {amount} > 6 ngày: chỉ dùng 6 ngày đầu tiên, và sau khi liệt kê, phản hồi thân thiện ví dụ: "Mình chỉ có dữ liệu tối đa 5 ngày thôi nhé!"
     - Nếu không có dữ liệu hoặc ngày đề cập trong quá khứ: phản hồi thân thiện ví dụ: "Xin lỗi, mình không có thông tin thời tiết cho ngày này."
     - Nếu có dữ liệu:
         • Tính trung bình nhiệt độ (°C), gió (m/s), độ ẩm (%), tổng mưa (mm).

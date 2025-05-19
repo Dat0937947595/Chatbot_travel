@@ -10,6 +10,8 @@ from datetime import datetime
 import json
 import time
 from tavily import TavilyClient
+from functools import partial
+
 
 # Import các thư viện từ LangChain và các thư viện khác
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
@@ -17,6 +19,7 @@ from langchain.schema.runnable import RunnableLambda
 from langchain_core.prompts import PromptTemplate
 from langchain_community.utilities import GoogleSearchAPIWrapper
 from langchain_community.document_loaders import WebBaseLoader
+from langchain.tools import Tool
 from pydantic import Field
 from typing import List, Optional, Literal, Dict
 from pydantic import BaseModel, Field
@@ -27,6 +30,7 @@ from prompts.location_info_prompt_template import location_info_prompt
 from prompts.itinerary_planner_prompt_template import itinerary_planner_prompt_template
 from prompts.weather_info_prompt_template import extract_info_prompt, weather_response_prompt
 from prompts.price_search_prompt_template import price_prompt
+from prompts.react_prompt import prompt_react
 
 # import utils
 from src.utils import *
@@ -91,7 +95,6 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import BaseTool
-from langchain.prompts import PromptTemplate
 from langchain import hub
 from langchain.agents import create_react_agent, AgentExecutor
 from langchain_core.output_parsers import StrOutputParser
@@ -160,7 +163,6 @@ def validate_query(llm, query: str, history: List) -> str:
     
     return {'ask_human': False, 'result': query}
 
-# print(enhance_context(llm, "các món ăn nổi tiếng ở HCM", [])['ask_human'])
 
 """ ----------------------------------------------- """
 """    Xử lý câu hỏi không liên quan hoặc chào hỏi."""
@@ -172,7 +174,6 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from pydantic import BaseModel, Field
 from typing import Optional
-from langchain import PromptTemplate
 
 class Relevant(BaseModel):
     is_relevant: bool = Field(
@@ -315,26 +316,52 @@ def itinerary_planner_function(chatbot, query):
     except Exception as e:
         return f"Lỗi khi lập kế hoạch: {str(e)}. Vui lòng thử lại."
 
-"""" --------------------------------- """
-"""Lấy thời gian hiện tại và múi giờ của các địa điểm du lịch."""
-def get_time_function(chatbot, query):
-    # Dùng thư viện time để lấy thời gian hiện tại
-    current_time = time.strftime("%H:%M:%S", time.localtime())
-    current_date = time.strftime("%Y-%m-%d", time.localtime())
-    current_timezone = time.tzname[0]  # Lấy tên múi giờ hiện tại
+""" ------------------------------------------------------------ """
+"""             Hàm tìm kiếm thông tin từ Tavily.           """
+from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage
+from langchain.agents import AgentExecutor, create_react_agent
+from langchain import hub
 
-    # Tạo phản hồi
-    response = f"Thời gian hiện tại là {current_time} ngày {current_date}, múi giờ: {current_timezone}."
-    chatbot.get_date_time(response)
-    return response
 
+
+# Khởi tạo LLM
+tavily_tool = TavilySearchResults(
+    max_results=3,
+    include_answer=True,       # sẽ trả về câu trả lời/tóm tắt tự động
+    include_raw_content=False,  # kèm luôn nội dung thô
+    search_depth="advanced",
+)
+
+# Hàm tìm kiếm với Tavily
+def search_agent(Chatbot, query: str):
+    llm = Chatbot.llm_gemini
+    try:
+        agent = create_react_agent(
+            llm=llm,
+            tools=[tavily_tool],    
+            prompt = prompt_react
+        )
+        agent_executor = AgentExecutor(
+            agent=agent, 
+            tools=[tavily_tool], 
+            verbose=True,
+            handle_parsing_errors=True
+        ) 
+        return agent_executor.invoke({"input": query})
+    except Exception as e:
+        logger.error(f"Error with Tavily search: {str(e)}")
+        return f"Lỗi khi tìm kiếm: {str(e)}"
+    
+# print(search_agent(llm, "Thời tiết ở Đà Nẵng hôm qua là gì?"))
 
 """ ---------------------------------------------------------------------------"""
 """     Hàm tra cứu và sinh phản hồi thời tiết chi tiết cho chatbot du lịch."""
 class ExtractInFoTool(BaseModel):
     city: Optional[str] = Field(
         None,
-        description="Tên thành phố cần tra cứu thời tiết. Lưu ý viết thường không dấu."
+        description="Tên thành phố cần tra cứu thời tiết. Lưu ý viết thường không dấu. ví dụ: 'ho chi minh'"
     )
     date: List[str] = Field(
         description="Các ngày cần tra cứu thời tiết. Nếu không có, mặc định là ngày hiện tại."
@@ -346,11 +373,12 @@ class ExtractInFoTool(BaseModel):
     )
 
 # Hàm tra cứu và sinh phản hồi thời tiết
-def weather_info_function(chatbot, query):
+def weather_info_function(llm, query):
+    # llm = Chatbot.llm_gemini
     BASE_URL = "http://api.openweathermap.org/data/2.5/forecast"
 
     # Chain trích xuất
-    extract_chain = extract_info_prompt | chatbot.llm_gemini.with_structured_output(ExtractInFoTool)
+    extract_chain = extract_info_prompt | llm.with_structured_output(ExtractInFoTool)
     try:
         extract_result = extract_chain.invoke({"query": query})
         logger.info(f"Extracted result: {extract_result}")
@@ -380,7 +408,7 @@ def weather_info_function(chatbot, query):
         return f"Lỗi khi tra cứu thời tiết: {str(e)}. Vui lòng thử lại."
 
     # Chain sinh phản hồi (truyền JSON thô)
-    response_chain = weather_response_prompt | chatbot.llm_gemini | StrOutputParser()
+    response_chain = weather_response_prompt | llm | StrOutputParser()
     try:
         response = response_chain.invoke({
             "query": query,
@@ -393,51 +421,32 @@ def weather_info_function(chatbot, query):
         logger.error(f"Error generating response: {str(e)}")
         return f"Lỗi khi xử lý dữ liệu thời tiết: {str(e)}. Vui lòng thử lại."
 
-""" ------------------------------------------------------------ """
-"""             Hàm tìm kiếm thông tin từ Tavily.           """
-from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage
-from langchain.agents import AgentExecutor, create_react_agent
-from langchain import hub
 
-# Khởi tạo tool
-tavily_tool = TavilySearchResults(
-    max_results=3,
-    include_answer=True,       # sẽ trả về câu trả lời/tóm tắt tự động
-    include_raw_content=True,  # kèm luôn nội dung thô
-    # include_images=True,       # nếu có ảnh, tool sẽ đưa vào kết quả
-    search_depth="advanced",
-)
-prompt = PromptTemplate.from_template(
-    """
-    Trả lời các câu hỏi sau đây một cách tốt nhất có thể. Bạn có quyền truy cập vào các công cụ sau:
-    {tools}
-    Sử dụng định dạng sau:
-    Question: câu hỏi đầu vào mà bạn phải trả lời
-    Thought: bạn nên luôn suy nghĩ về việc cần làm gì
-    Action: hành động cần thực hiện, nên là một trong số [{tool_names}]
-    Action Input: đầu vào cho hành động
-    Observation: kết quả của hành động
-    ... (quy trình Thought/Action/Action Input/Observation này có thể lặp lại N lần)
-    Thought: Bây giờ tôi đã biết câu trả lời cuối cùng
-    Final Answer: câu trả lời cuối cùng cho câu hỏi đầu vào ban đầu. Câu trả lời thân thiện và tự nhiên.
-    Begin!
-    Question: {input}
-    Thought:{agent_scratchpad}
-    """
-)
-
-# Hàm tìm kiếm với Tavily
-def search_agent(chatbot, query: str) -> str:
+def agent_weather(Chatbot, query):
+    llm = Chatbot.llm_gemini
+    weather_tool = Tool(
+        name="weather_tool",
+        func=lambda input: weather_info_function(llm, input),
+        description="Cung cấp thông tin thời tiết cho một thành phố cụ thể trong một khoảng thời gian nhất định."
+    )
+    
+    tools = [weather_tool]
+    """Hàm xử lý thời tiết với agent."""
     try:
         agent = create_react_agent(
-            llm=chatbot.llm_gemini,
-            tools=[tavily_tool],    
-            prompt = prompt
+            llm=llm,
+            tools=tools,
+            prompt= prompt_react  # Sử dụng prompt từ langchain hub
         )
-        agent_executor = AgentExecutor(agent=agent, tools=[tavily_tool], verbose=True) 
+        agent_executor = AgentExecutor(
+            agent=agent, 
+            tools=tools, 
+            verbose=True,
+            handle_parsing_errors=True
+        )
         return agent_executor.invoke({"input": query})
     except Exception as e:
-        logger.error(f"Error with Tavily search: {str(e)}")
-        return f"Lỗi khi tìm kiếm: {str(e)}"
+        logger.error(f"Error with weather agent: {str(e)}")
+        return f"Lỗi khi xử lý thời tiết: {str(e)}"
+
+# print(agent_weather(llm, "Thời tiết ở Đà Nẵng 10 ngày tới là gì?"))
