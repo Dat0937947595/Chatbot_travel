@@ -12,7 +12,6 @@ import time
 from tavily import TavilyClient
 from functools import partial
 
-
 # Import các thư viện từ LangChain và các thư viện khác
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain.schema.runnable import RunnableLambda
@@ -30,7 +29,19 @@ from prompts.location_info_prompt_template import location_info_prompt
 from prompts.itinerary_planner_prompt_template import itinerary_planner_prompt_template
 from prompts.weather_info_prompt_template import extract_info_prompt, weather_response_prompt
 from prompts.price_search_prompt_template import price_prompt
-from prompts.react_prompt import prompt_react
+from prompts.react_prompt import prompt_react_research, prompt_react_weather, prompt_react_local_agent
+
+from typing import Optional, List
+from pydantic import BaseModel, Field
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.tools import BaseTool
+from langchain import hub
+from langchain.agents import create_react_agent, AgentExecutor
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.tools.base import ArgsSchema
+
+# Khởi tạo LLM
+llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
 
 # import utils
 from src.utils import *
@@ -64,44 +75,6 @@ def format_input(retrieval_chain_rag_fusion, inputs):
     context_result = retrieval_chain_rag_fusion.invoke(inputs)
     return {"retrieved_context": context_result, "question": inputs["question"]}
 
-def generate_response(chatbot, user_input, prompt_template_for_query):
-    """Sinh phản hồi dựa trên truy vấn và ngữ cảnh."""
-    # Lấy danh sách câu hỏi từ query_generation_chain
-    cleaned_query_generation = RunnableLambda(lambda x: get_questions(chatbot, x))
-
-    retrieval_chain_rag_fusion = (
-        cleaned_query_generation
-        | chatbot.retriever.map()  # Áp dụng retriever cho từng câu hỏi trong danh sách
-        | RunnableLambda(lambda results: reciprocal_rank_fusion(results))  # Gộp kết quả
-    )
-
-    document_retrieval_chain = retrieval_chain_rag_fusion.invoke({"question": user_input})
-    # logger.info(f"\nGọi RAG Fusion chain với câu truy vấn: {user_input}\n {document_retrieval_chain}\n")
-
-    formatted_prompt = RunnableLambda(lambda x: prompt_template_for_query.format(**x))
-
-    final_rag_chain = (
-        RunnableLambda(lambda x: format_input(retrieval_chain_rag_fusion, x))
-        | formatted_prompt
-        | chatbot.llm_gemini
-        | StrOutputParser()
-    )
-
-    return final_rag_chain.invoke({"question": user_input})
-
-""" -------------------------------------------------------------- """
-"""     Tăng cường cho câu hỏi người dùng."""
-from typing import Optional, List
-from pydantic import BaseModel, Field
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.tools import BaseTool
-from langchain import hub
-from langchain.agents import create_react_agent, AgentExecutor
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.tools.base import ArgsSchema
-
-# Khởi tạo LLM
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
 
 """ ----------------------------------------------------- """
 """      Tăng cường ngữ cảnh cho câu hỏi."""
@@ -127,10 +100,26 @@ class TravelInfoExtraction(BaseModel):
 def extract_travel_info_tool(llm, query):
     prompt = PromptTemplate(
         template="""
-        Bạn là chuyên gia phân tích câu truy vấn du lịch. Nhiệm vụ của bạn là phân tích câu hỏi và xác định xem câu hỏi có rõ ràng hay không, có có cần hỏi thêm thông tin hay không.
+        Bạn là chuyên gia phân tích câu truy vấn du lịch. 
+        Nhiệm vụ của bạn là phân tích câu hỏi và xác định xem câu hỏi có rõ ràng hay không, có có cần hỏi thêm thông tin hay không.
         Truy vấn: {query}
         Nếu không đề cập tới thời gian, mặc định ngày hiện tại.
         Thời gian hiện tại: {current_time}
+        
+        ### Hướng dẫn:
+        - Nếu câu hỏi đã rõ ràng, trả về JSON với is_clear = true và không cần missing_info.
+        - Nếu câu hỏi không rõ ràng, trả về JSON với is_clear = false và missing_info là thông tin cần hỏi thêm để làm rõ câu hỏi.
+        - Tránh nhập nhằng về ngữ nghĩa, chỉ hỏi những thông tin cần thiết để làm rõ câu hỏi.
+
+        ### Ví dụ: 
+        1. Câu hỏi: "Tôi muốn đi Đà Nẵng vào 15-06-2025, thời tiết thế nào?"
+        → is_clear: true
+        (vì đã rõ ràng về thời gian và địa điểm, không cần hỏi thêm thông tin)
+        
+        2. Câu hỏi: "Tôi muốn đi Đà Nẵng, thời tiết thế nào?"
+        → is_clear: false
+        missing_info: "Bạn muốn đi Đà Nẵng vào ngày nào?"
+        
         """,
         input_variables=["query"]
     ).partial(current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -223,6 +212,7 @@ def relevant_travel(llm_gemini, query):
         response: "Chào bạn! Mình là trợ lý du lịch, bạn có thắc mắc gì về chuyến đi không?"  
         </examples>
 
+
         User question: "{query}"
 
         Hãy chỉ trả về JSON hợp lệ theo schema Pydantic `Relevant`, không thêm text nào khác.
@@ -234,99 +224,75 @@ def relevant_travel(llm_gemini, query):
 
 # res = not_relevant_function("Cho tôi thông tin về ronaldo")
 # print(res)  # Chào bạn, hôm nay trời đẹp nhỉ?
+def generate_response(chatbot, user_input, prompt_template_for_query):
+    """Sinh phản hồi dựa trên truy vấn và ngữ cảnh."""
+    # Lấy danh sách câu hỏi từ query_generation_chain
+    cleaned_query_generation = RunnableLambda(lambda x: get_questions(chatbot, x))
+
+    retrieval_chain_rag_fusion = (
+        cleaned_query_generation
+        | chatbot.retriever.map()  # Áp dụng retriever cho từng câu hỏi trong danh sách
+        | RunnableLambda(lambda results: reciprocal_rank_fusion(results))  # Gộp kết quả
+    )
+
+    document_retrieval_chain = retrieval_chain_rag_fusion.invoke({"question": user_input})
+    # logger.info(f"\nGọi RAG Fusion chain với câu truy vấn: {user_input}\n {document_retrieval_chain}\n")
+
+    formatted_prompt = RunnableLambda(lambda x: prompt_template_for_query.format(**x))
+
+    final_rag_chain = (
+        RunnableLambda(lambda x: format_input(retrieval_chain_rag_fusion, x))
+        | formatted_prompt
+        | chatbot.llm_gemini
+        | StrOutputParser()
+    )
+
+    return final_rag_chain.invoke({"question": user_input})
 
 """ --------------------------------- """
 """Xử lý các câu hỏi liên quan đến địa điểm, thông tin địa điểm."""
 def location_info_function(chatbot, query):
-    return generate_response(chatbot, query, location_info_prompt)
-
-
-""" --------------------------------- """
-"""Xử lý các câu hỏi liên quan đến lập kế hoạch du lịch."""
-def itinerary_planner_function(chatbot, query):
-    """Lập kế hoạch chuyến đi chi tiết, tích hợp thông tin từ các tool khác."""
-
-    extract_prompt = PromptTemplate(
-        input_variables=["query"],
-        template="""
-        Trích xuất thông tin từ câu hỏi để lập kế hoạch du lịch:
-        - Thời gian chuyến đi (số ngày, số đêm nếu có).
-        - Điểm đến.
-        - Sở thích (nghỉ dưỡng, văn hóa, ẩm thực, phiêu lưu, gia đình, ...).
-        - Ngân sách (cao cấp, trung bình, tiết kiệm - nếu có).
-        - Phương tiện di chuyển (nếu có).
-        Câu hỏi: "{query}"
-        Trả về JSON:
-        {{"duration": "<số ngày/ngày+đêm>", "destination": "<điểm đến>", "preferences": "<sở thích>", "budget": "<ngân sách>", "transport": "<phương tiện>"}}
-        Nếu thiếu thông tin, để giá trị là null.
-        """
-    )
-
-    extract_chain = extract_prompt | chatbot.llm_gemini | JsonOutputParser()
+    'Dùng AgentExecutor để xử lý các câu hỏi liên quan đến địa điểm, thông tin địa điểm.'
+    llm = chatbot.llm_gemini
+    location_tool = Tool(
+        name="location_tool",
+        func=lambda input: generate_response(chatbot, input, location_info_prompt),
+        description=(
+            "Cung cấp thông tin về du lịch bao gồm địa điểm, món ăn, lịch sử, văn hóa, địa lý, v.v. "
+            "Trả về thông tin chi tiết và hữu ích cho người dùng như là một chuyên gia tư vấn du lịch 10 năm kinh nghiệm."
+        )
+    )   
+    tools = [location_tool]
+    """Hàm xử lý thông tin địa điểm với agent."""
     try:
-        extracted_info = extract_chain.invoke({"query": query})
-    except Exception as e:
-        return "Vui lòng cung cấp thông tin rõ ràng hơn (địa điểm, thời gian, sở thích)."
-
-    if not extracted_info.get("destination") or not extracted_info.get("duration"):
-        return "Bạn muốn đi đâu và trong bao lâu?"
-
-    destination = extracted_info["destination"]
-    duration = extracted_info["duration"]
-    print("========================Thông tin bổ sung=============================")
-    # Lấy thông tin bổ sung
-    try:
-        date_time = chatbot.print_date_time()
-        weather_query = f"Thời tiết ở {destination} trong {duration} bắt đầu từ ngày {date_time}"
-        weather_data = chatbot.executor.invoke({"input": weather_query})
-        weather_data = weather_data.get("output")
-        if "<Ask>" in weather_data:
-            weather_data = "Thời tiết bình thường."
-
-        location_query = f"Thông tin về {destination}"
-        location_data = chatbot.executor.invoke({"input": location_query})
-        location_data = location_data.get("output")
-        if "<Ask>" in location_data:
-            location_data = f"{destination} là một điểm đến phổ biến."
-
-        price_query = f"Giá dịch vụ du lịch ở {destination} (khách sạn, vé tham quan, ăn uống)"
-        price_data = chatbot.executor.invoke({"input": price_query})
-        price_data = price_data.get("output")
-        if "<Ask>" in price_data:
-            price_data = "Giá cả trung bình."
-
-    except Exception as e:
-        weather_data = "Thời tiết bình thường."
-        location_data = f"{destination} là một điểm đến phổ biến."
-        price_data = "Giá cả trung bình."
-
-    # Sinh lịch trình
-    response_chain = itinerary_planner_prompt_template | chatbot.llm_gemini | StrOutputParser()
-    retrieved_context = chatbot.retriever.invoke(query)
-    all_contents = [doc.page_content for doc in retrieved_context]
-    try:
-        response = response_chain.invoke({
-            "query": query,
-            "retrieved_context": all_contents,
-            "weather_data": weather_data,
-            "location_data": location_data,
-            "price_data": price_data
-        })
+        response = AgentExecutor(
+            agent=create_react_agent(
+                llm=llm, 
+                tools=tools,
+                prompt=prompt_react_local_agent
+                ),
+            tools=tools,
+            verbose=True,
+            handle_parsing_errors=True
+        ).invoke({"input": query})
         return response
+
     except Exception as e:
-        return f"Lỗi khi lập kế hoạch: {str(e)}. Vui lòng thử lại."
+        logger.error(f"Error processing location info query: {str(e)}")
+        return f"Đã xảy ra lỗi: {str(e)}"
+
 
 """ ------------------------------------------------------------ """
 """             Hàm tìm kiếm thông tin từ Tavily.           """
-from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_tavily import TavilySearch
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 from langchain.agents import AgentExecutor, create_react_agent
 from langchain import hub
 
 # Tạo một công cụ tìm kiếm với Tavily
-tavily_tool = TavilySearchResults(
-    max_results=3,
+tavily_tool = TavilySearch(
+    max_results=5,
     include_answer=True,       # sẽ trả về câu trả lời/tóm tắt tự động
     include_raw_content=False,  # kèm luôn nội dung thô
     search_depth="advanced",
@@ -407,7 +373,7 @@ def search_agent(Chatbot, query: str):
         agent = create_react_agent(
             llm=llm,
             tools=tools,    
-            prompt = prompt_react
+            prompt = prompt_react_research
         )
         agent_executor = AgentExecutor(
             agent=agent, 
@@ -487,7 +453,6 @@ def weather_info_function(llm, query):
         logger.error(f"Error generating response: {str(e)}")
         return f"Lỗi khi xử lý dữ liệu thời tiết: {str(e)}. Vui lòng thử lại."
 
-
 def agent_weather(Chatbot, query):
     llm = Chatbot.llm_gemini
     weather_tool = Tool(
@@ -502,14 +467,15 @@ def agent_weather(Chatbot, query):
         agent = create_react_agent(
             llm=llm,
             tools=tools,
-            prompt= prompt_react  # Sử dụng prompt từ langchain hub
+            prompt= prompt_react_weather  # Sử dụng prompt từ langchain hub
         )
         agent_executor = AgentExecutor(
             agent=agent, 
             tools=tools, 
             verbose=True,
-            handle_parsing_errors=True
+            # handle_parsing_errors=True
         )
+        
         return agent_executor.invoke({"input": query})
     except Exception as e:
         logger.error(f"Error with weather agent: {str(e)}")

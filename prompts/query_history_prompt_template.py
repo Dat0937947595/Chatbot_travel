@@ -14,6 +14,7 @@ Nhiệm vụ: Phân tích lịch sử, tinh chỉnh truy vấn nếu cần để
 
 Lưu ý: Câu hỏi được viết lại thành một câu hỏi hoàn chỉnh, rõ ràng và dễ hiểu hơn.
 
+Thời gian hiện tại: {current_time}
 ---  
 Định nghĩa “câu hỏi hoàn chỉnh”:  
 - Đưa vào thông tin ngữ cảnh quan trọng từ lịch sử (địa điểm, thời gian, mục đích, đối tượng…)  

@@ -17,10 +17,13 @@ from langchain.agents import AgentExecutor, create_react_agent
 from langchain.chains import LLMChain
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
+from langchain.schema import Document
+from langchain.retrievers import EnsembleRetriever
+from langchain_community.retrievers import BM25Retriever
 
 # Import nội bộ project
 from config.config import VECTORSTORE_DIR  # Giả sử bạn đã định nghĩa các hằng số trong config
-from src.services import *
+from src.services import search_agent, agent_weather, location_info_function, rewrite_query, relevant_travel, validate_query
 
 # Import các prompt template
 from prompts.main_prompt_template import main_prompt_template
@@ -42,7 +45,7 @@ class Chatbot:
         self.model = Model()
         self.llm_gemini = self.model.get_llm_gemini()
         self.embedding_model = self.model.get_embedding()
-        
+        self.retrieval = []
         # Lịch sử hội thoại và truy vấn
         self.memory = ConversationBufferMemory(
             memory_key="chat_history",
@@ -59,6 +62,26 @@ class Chatbot:
             search_kwargs={"k": 5}
         )
 
+        # Lấy toàn bộ documents từ Chroma
+        chroma_docs_raw = self.vectorstore.get()['documents']
+        bm25_docs = [Document(page_content=doc) for doc in chroma_docs_raw]
+
+        # Tạo BM25 retriever từ chính các chunk trong Chroma
+        self.bm25_retriever = BM25Retriever.from_documents(bm25_docs)
+        self.bm25_retriever.k = 5
+
+        # Tạo retriever từ Chroma (semantic)
+        self.chroma_retriever = self.vectorstore.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k": 5}
+        )
+
+        # Kết hợp BM25 và Chroma
+        self.retriever = EnsembleRetriever(
+            retrievers=[self.bm25_retriever, self.chroma_retriever],
+            weights=[0.5, 0.5]
+        )
+
         # Chain để tinh chỉnh truy vấn
         self.query_generation_chain = query_generation_prompt_template | self.llm_gemini | JsonOutputParser()
 
@@ -70,7 +93,7 @@ class Chatbot:
             tools=self.tools,
             memory=self.memory,
             verbose=verbose,  #  Tùy chọn bật/tắt log chi tiết
-            handle_parsing_errors=True  # Tự động xử lý lỗi parsing
+            handle_parsing_errors=True,  # Tự động xử lý lỗi parsing
         )
 
     def _initialize_tools(self):
@@ -147,7 +170,7 @@ class Chatbot:
                 return query_checker['result']
 
             # Gọi agent để xử lý truy vấn
-            response = self.executor.invoke({"input": user_input})
+            response = self.executor.invoke({"input": rewrite['refined_query']})
             output_text = response.get("output", "Không có phản hồi từ agent.")
 
             # logger.info(f"Generated response: {output_text}")
