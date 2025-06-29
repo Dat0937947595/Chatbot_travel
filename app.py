@@ -18,7 +18,7 @@ if __name__ == "__main__":
     # Cấu hình trang
     st.set_page_config(
         page_title="Chatbot Q&A Assistant",
-        page_icon="imgs/avatar_streamly.png",
+        page_icon="imgs/bot.png",
         layout="wide",
         initial_sidebar_state="auto"
     )

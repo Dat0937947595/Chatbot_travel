@@ -1,7 +1,5 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from config.config import *
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_groq import ChatGroq
 from langchain_chroma import Chroma
 from dotenv import load_dotenv  
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
