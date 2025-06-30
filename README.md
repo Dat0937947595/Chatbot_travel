@@ -51,8 +51,6 @@ Sau khi chạy thành công, truy cập tại: [http://localhost:8501](http://lo
 
 > **Lưu ý:** Nếu bạn dùng Docker Desktop, đảm bảo cổng 8501 chưa bị chiếm và Docker đã khởi động.
 
----
-
 ## Cấu trúc dự án
 
 ```
