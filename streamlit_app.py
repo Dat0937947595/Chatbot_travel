@@ -9,12 +9,6 @@ import threading
 logging.basicConfig(level=logging.INFO)
 
 if __name__ == "__main__":
-    if st.session_state.get("resetting", False):
-        # Xóa cờ và rerun trước khi vẽ giao diện
-        del st.session_state["resetting"]
-        st.rerun()
-
-
     # Cấu hình trang
     st.set_page_config(
         page_title="Chatbot Q&A Assistant",
@@ -41,18 +35,7 @@ if __name__ == "__main__":
         return Chatbot(verbose=False)
 
     chatbot = init_chatbot()
-
-    if "history" not in st.session_state:
-        st.session_state.history = []
-    if "conversation_started" not in st.session_state:
-        st.session_state.conversation_started = True
-        st.session_state.history.append({
-            "role": "assistant",
-            "content": "Xin chào! Tôi có thể giúp gì cho bạn hôm nay?"
-        })
-    if "is_processing" not in st.session_state:
-        st.session_state.is_processing = False
-
+    
     # CSS làm đẹp hình ảnh avatar và vòng tròn loading
     st.markdown("""
         <style>
@@ -106,6 +89,12 @@ if __name__ == "__main__":
     st.sidebar.markdown("### Hướng đẫn:")
     st.sidebar.markdown("Nhập câu hỏi của bạn vào hộp thoại bên cạnh để bắt đầu.")
     st.sidebar.markdown("---")
+    
+    # Nút reset hội thoại
+    if st.sidebar.button("🔁 Reset hội thoại"):
+        chatbot.reset_memory()
+        st.session_state.clear()
+        st.session_state.reset_flag = True
 
     # Hiển thị lịch sử chat
     def display_chat_history():
@@ -173,7 +162,19 @@ if __name__ == "__main__":
                     """, unsafe_allow_html=True)
                     time.sleep(0.015)
             
-        
+    # Kiểm tra session state và khởi tạo nếu cần
+    if "history" not in st.session_state:
+        st.session_state.history = []
+    if "conversation_started" not in st.session_state:
+        st.session_state.conversation_started = True
+        st.session_state.history.append({
+            "role": "assistant",
+            "content": "Xin chào! Tôi có thể giúp gì cho bạn hôm nay?"
+        })
+            
+    if "is_processing" not in st.session_state:
+        st.session_state.is_processing = False
+
     # Hộp chat input
     user_input = st.chat_input("Nhập câu hỏi của bạn ở đây ...", disabled=st.session_state.is_processing)
     if user_input:
@@ -211,10 +212,3 @@ if __name__ == "__main__":
     else:
         # Hiển thị lịch sử chat khi không có input mới
         display_last_ai_message()
-
-    # Nút reset
-    if st.sidebar.button("🔁 Reset hội thoại"):
-        chatbot.reset_memory()
-        st.session_state.clear()
-        st.session_state["resetting"] = True
-        st.stop()  # Dừng mọi render tiếp theo → tránh hiện thông tin cũ

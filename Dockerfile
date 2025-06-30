@@ -12,5 +12,4 @@ RUN pip install tavily-python dotenv pydantic requests streamlit rank_bm25
 
 COPY . .
 
-# Run app
-CMD ["streamlit", "run", "app.py"]
+CMD ["streamlit", "run", "streamlit_app.py"]

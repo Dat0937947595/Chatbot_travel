@@ -181,5 +181,5 @@ class Chatbot:
 
     def reset_memory(self):
         """Xóa bộ nhớ hội thoại."""
-        self.memory.clear()
+        self.memory.chat_memory.messages.clear()
         logger.info("Conversation memory has been reset.")
