@@ -2,8 +2,29 @@
 
 ## Cách chạy ứng dụng
 
-### Chạy trực tiếp bằng Streamlit
+### Chạy trực tiếp bằng Streamlit (Local)
 
+1. **Tạo môi trường ảo:**
+```bash
+python -m venv venv
+```
+
+2. **Kích hoạt môi trường ảo:**
+- Trên Windows:
+```bash
+source venv\Scripts\activate
+```
+
+3. **Cài đặt thư viện cần thiết:**
+```bash
+pip install -U langchain langchain-chroma \
+    langchain_core langchain_community langchain_google_genai \
+    langchain_tavily
+
+pip install tavily-python python-dotenv pydantic requests streamlit rank_bm25
+```
+
+4. **Chạy ứng dụng:**
 ```bash
 streamlit run app.py
 ```
